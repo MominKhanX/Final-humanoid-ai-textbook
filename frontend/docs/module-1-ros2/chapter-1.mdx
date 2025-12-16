@@ -1,0 +1,259 @@
+---
+title: "Introduction to ROS 2 Architecture"
+description: "Understanding the fundamental concepts and architecture of Robot Operating System 2"
+sidebar_position: 1
+---
+
+# Introduction to ROS 2 Architecture
+
+Welcome to the first module of our Physical AI journey! This chapter introduces you to Robot Operating System 2 (ROS 2), the distributed communication framework that serves as the "nervous system" for modern robots. ROS 2 enables different software components to communicate and coordinate, whether they run on the same computer or across a network.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Explain the core concepts of ROS 2 architecture
+- Identify the key differences between ROS 1 and ROS 2
+- Understand the role of DDS in ROS 2 communication
+- Recognize the main ROS 2 concepts: nodes, topics, services, and actions
+- Set up a basic ROS 2 development environment
+
+## What is ROS 2?
+
+Robot Operating System 2 (ROS 2) is not an operating system but rather a flexible framework for writing robot software. It provides libraries and tools to help software developers create robot applications. ROS 2 is designed to be suitable for real-world applications and addresses many limitations of the original ROS 1.
+
+### Key Features of ROS 2
+
+- **Real-time support**: Enables time-critical robot applications
+- **Multi-robot systems**: Supports coordination between multiple robots
+- **Distributed systems**: Communication across different machines
+- **Security**: Built-in security features for production deployment
+- **Quality of Service (QoS)**: Configurable reliability and performance options
+- **Cross-platform**: Runs on Linux, Windows, and macOS
+
+## ROS 2 vs ROS 1: Key Differences
+
+ROS 2 was built to address limitations of ROS 1:
+
+### Architecture Foundation
+- **ROS 1**: Uses a centralized master-slave architecture with a single ROS Master
+- **ROS 2**: Uses a decentralized architecture based on DDS (Data Distribution Service)
+
+### Communication Layer
+- **ROS 1**: Custom TCP/UDP-based communication
+- **ROS 2**: DDS-based communication with pluggable implementations
+
+### Real-time Capabilities
+- **ROS 1**: Limited real-time support
+- **ROS 2**: Designed with real-time systems in mind
+
+### Security
+- **ROS 1**: No built-in security
+- **ROS 2**: Comprehensive security model with authentication and encryption
+
+## DDS: The Foundation of ROS 2
+
+DDS (Data Distribution Service) is the middleware that powers ROS 2 communication. It provides:
+
+- **Publish/Subscribe**: Data distribution pattern
+- **Request/Reply**: Synchronous communication pattern
+- **Discovery**: Automatic peer-to-peer discovery
+- **Quality of Service**: Configurable reliability, durability, and performance settings
+- **Persistence**: Data lifecycle management
+
+### DDS Implementations
+
+ROS 2 supports multiple DDS implementations:
+- **Fast DDS** (default): eProsima's implementation
+- **Cyclone DDS**: Eclipse Foundation's implementation
+- **RTI Connext DDS**: RTI's commercial implementation
+- **OpenSplice DDS**: ADLINK's implementation
+
+## Core ROS 2 Concepts
+
+### Nodes
+A node is a process that performs computation. In ROS 2:
+- Each node runs in its own process
+- Nodes can be written in different languages (C++, Python, etc.)
+- Nodes communicate with each other through topics, services, and actions
+- A single application may consist of multiple nodes working together
+
+### Topics and Messages
+Topics enable asynchronous communication between nodes:
+- Publishers send messages to topics
+- Subscribers receive messages from topics
+- Multiple publishers and subscribers can exist for the same topic
+- Communication is decoupled: publishers and subscribers don't need to know about each other
+
+### Services
+Services enable synchronous request/reply communication:
+- Client sends a request and waits for a response
+- Server processes the request and sends a response
+- Useful for operations that must complete before proceeding
+
+### Actions
+Actions enable goal-oriented communication with feedback:
+- Similar to services but with ongoing feedback
+- Used for long-running operations
+- Supports goal preemption (cancellation)
+
+## ROS 2 Ecosystem
+
+### Client Libraries
+- **rclcpp**: C++ client library
+- **rclpy**: Python client library
+- **rclc**: C client library (for embedded systems)
+- **rclnodejs**: Node.js client library
+- **r2r**: Rust client library
+
+### Tools
+- **ros2**: Command-line interface for ROS 2
+- **rviz2**: 3D visualization tool
+- **rqt**: GUI tools framework
+- **rosbag2**: Data recording and playback
+- **ros2doctor**: System diagnostic tool
+
+## ROS 2 Installation and Setup
+
+### Prerequisites
+- Ubuntu 22.04 LTS (recommended) or other supported OS
+- Python 3.8 or higher
+- Development tools (gcc, cmake, etc.)
+
+### Installation Options
+1. **Binary packages** (recommended): Easy installation with apt
+2. **Docker**: Isolated environment with pre-configured ROS 2
+3. **From source**: For development and customization
+
+### ROS 2 Distributions
+ROS 2 follows a time-based release schedule:
+- **Humble Hawksbill** (2022): Current LTS (Long Term Support)
+- **Iron Irwini** (2023): Current LTS
+- **Jazzy Jalisco** (2024): Current development version
+
+## Setting Up Your Workspace
+
+### Environment Setup
+```bash
+# Source ROS 2 installation
+source /opt/ros/humble/setup.bash
+
+# Add to ~/.bashrc for automatic sourcing
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+```
+
+### Creating a Workspace
+```bash
+# Create workspace directory
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws
+
+# Build the workspace
+colcon build
+
+# Source the workspace
+source install/setup.bash
+```
+
+## Basic ROS 2 Concepts in Practice
+
+### Node Example Structure
+```
+my_robot_package/
+├── CMakeLists.txt
+├── package.xml
+├── src/
+│   └── my_node.cpp
+└── launch/
+    └── my_launch_file.py
+```
+
+### Package Structure
+- **package.xml**: Package metadata and dependencies
+- **CMakeLists.txt**: Build configuration (for C++)
+- **setup.py**: Build configuration (for Python)
+- **src/**: Source code files
+- **launch/**: Launch files for running multiple nodes
+- **config/**: Configuration files
+- **test/**: Unit tests
+
+## Quality of Service (QoS) Settings
+
+QoS settings allow fine-tuning of communication behavior:
+
+### Reliability
+- **Reliable**: All messages are delivered (default for topics)
+- **Best effort**: Messages may be lost (for real-time applications)
+
+### Durability
+- **Transient local**: Late-joining subscribers receive last message
+- **Volatile**: Only new messages are sent to subscribers
+
+### History
+- **Keep last**: Store a fixed number of messages
+- **Keep all**: Store all messages (memory intensive)
+
+## ROS 2 Communication Patterns
+
+### Publisher-Subscriber Pattern
+```python
+# Publisher sends sensor data
+publisher.publish(sensor_data)
+
+# Subscriber processes sensor data
+def sensor_callback(msg):
+    process_sensor_data(msg)
+```
+
+### Service Client-Server Pattern
+```python
+# Client requests robot to move
+response = client.call(move_request)
+
+# Server processes move request
+def move_service(request, response):
+    execute_move_command(request)
+    response.success = True
+    return response
+```
+
+### Action Client-Server Pattern
+```python
+# Client sends navigation goal
+action_client.send_goal(navigation_goal)
+
+# Server provides feedback during navigation
+def navigation_execute(goal_handle):
+    while navigating:
+        feedback.current_pose = get_robot_pose()
+        goal_handle.publish_feedback(feedback)
+```
+
+## ROS 2 in Humanoid Robotics
+
+ROS 2 is particularly well-suited for humanoid robotics:
+
+### Distributed Architecture
+- Control systems can run on different computers
+- Sensor processing can be distributed across multiple nodes
+- Real-time and non-real-time components can be separated
+
+### Multi-robot Coordination
+- Multiple humanoid robots can coordinate using ROS 2
+- Shared perception and planning systems
+
+### Safety and Security
+- Built-in security features for safe human-robot interaction
+- Real-time capabilities for safety-critical operations
+
+## Summary
+
+ROS 2 provides the communication infrastructure for modern robotics applications. Its decentralized architecture, real-time capabilities, and security features make it ideal for humanoid robotics. Understanding ROS 2 architecture is fundamental to building complex robot systems that can see, think, and act in the physical world.
+
+## Next Steps
+
+In the next chapter, we'll dive deeper into the fundamental ROS 2 communication patterns: nodes, topics, services, and actions. You'll create your first ROS 2 publisher and subscriber nodes.
+
+---
+
+**Estimated Reading Time**: 18 minutes

@@ -1,0 +1,640 @@
+---
+title: "Robot Description Formats (URDF/SDF)"
+description: "Understanding and using URDF and SDF for robot description in simulation"
+sidebar_position: 2
+---
+
+# Robot Description Formats (URDF/SDF)
+
+This chapter explores the two primary robot description formats used in robotics simulation: URDF (Unified Robot Description Format) and SDF (Simulation Description Format). Understanding both formats is crucial for creating effective digital twins of humanoid robots.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Understand the differences between URDF and SDF formats
+- Create and modify SDF files for simulation-specific requirements
+- Convert between URDF and SDF formats
+- Use SDF extensions for advanced simulation features
+- Apply SDF to create complex simulation environments
+- Integrate SDF models with ROS 2 simulation
+
+## URDF vs SDF: Key Differences
+
+### URDF (Unified Robot Description Format)
+- **Purpose**: Primarily for robot structure and kinematics
+- **Format**: XML-based
+- **Scope**: Robot-specific description
+- **Use Cases**: ROS integration, kinematics, basic visualization
+- **Limitations**: No physics engine details, simulation-specific features
+
+### SDF (Simulation Description Format)
+- **Purpose**: Comprehensive simulation description
+- **Format**: XML-based
+- **Scope**: Entire simulation environment (robots, world, physics)
+- **Use Cases**: Simulation, physics, sensors, plugins
+- **Advantages**: Physics parameters, sensors, plugins, world descriptions
+
+## SDF Structure and Components
+
+### Basic SDF Format
+```xml
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <model name="my_robot">
+    <!-- Links define rigid bodies -->
+    <link name="base_link">
+      <pose>0 0 0.1 0 0 0</pose>
+
+      <!-- Inertial properties -->
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.1</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.1</iyy>
+          <iyz>0</iyz>
+          <izz>0.1</izz>
+        </inertia>
+      </inertial>
+
+      <!-- Visual properties -->
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.2 0.2 0.2</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.2 0.2 1</ambient>
+          <diffuse>0.8 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Collision properties -->
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.2 0.2 0.2</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Joints connect links -->
+    <joint name="joint1" type="revolute">
+      <parent>base_link</parent>
+      <child>link1</child>
+      <pose>0 0 0.1 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.57</lower>
+          <upper>1.57</upper>
+          <effort>100</effort>
+          <velocity>2</velocity>
+        </limit>
+      </axis>
+    </joint>
+  </model>
+</sdf>
+```
+
+## Advanced SDF Features for Humanoid Robots
+
+### 1. Physics Properties
+```xml
+<link name="left_foot">
+  <collision name="collision">
+    <geometry>
+      <box>
+        <size>0.2 0.1 0.05</size>
+      </box>
+    </geometry>
+    <surface>
+      <friction>
+        <ode>
+          <mu>1.0</mu>
+          <mu2>1.0</mu2>
+          <fdir1>0 0 1</fdir1>
+        </ode>
+      </friction>
+      <contact>
+        <ode>
+          <kp>1e6</kp>
+          <kd>100</kd>
+          <max_vel>100.0</max_vel>
+          <min_depth>0.001</min_depth>
+        </ode>
+      </contact>
+      <bounce>
+        <restitution_coefficient>0.1</restitution_coefficient>
+        <threshold>100000</threshold>
+      </bounce>
+    </surface>
+  </collision>
+</link>
+```
+
+### 2. Sensor Definitions
+```xml
+<link name="head">
+  <!-- RGB-D Camera -->
+  <sensor name="camera" type="camera">
+    <pose>0.05 0 0 0 0 0</pose>
+    <camera>
+      <horizontal_fov>1.047</horizontal_fov>
+      <image>
+        <width>640</width>
+        <height>480</height>
+        <format>R8G8B8</format>
+      </image>
+      <clip>
+        <near>0.1</near>
+        <far>10</far>
+      </clip>
+    </camera>
+    <always_on>1</always_on>
+    <update_rate>30</update_rate>
+    <visualize>true</visualize>
+  </sensor>
+
+  <!-- IMU Sensor -->
+  <sensor name="imu" type="imu">
+    <pose>0 0 0 0 0 0</pose>
+    <always_on>1</always_on>
+    <update_rate>100</update_rate>
+    <imu>
+      <angular_velocity>
+        <x>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>2e-4</stddev>
+          </noise>
+        </x>
+        <y>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>2e-4</stddev>
+          </noise>
+        </y>
+        <z>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>2e-4</stddev>
+          </noise>
+        </z>
+      </angular_velocity>
+      <linear_acceleration>
+        <x>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>1.7e-2</stddev>
+          </noise>
+        </x>
+        <y>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>1.7e-2</stddev>
+          </noise>
+        </y>
+        <z>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>1.7e-2</stddev>
+          </noise>
+        </z>
+      </linear_acceleration>
+    </imu>
+  </sensor>
+</link>
+```
+
+### 3. Gazebo-Specific Extensions
+```xml
+<!-- SDF file with Gazebo plugins -->
+<sdf version="1.7">
+  <model name="humanoid_robot">
+    <!-- Model content -->
+
+    <!-- Gazebo plugins for ROS 2 integration -->
+    <gazebo reference="base_link">
+      <material>Gazebo/Orange</material>
+    </gazebo>
+
+    <gazebo>
+      <plugin name="ros_control" filename="libgazebo_ros_control.so">
+        <robot_namespace>/humanoid_robot</robot_namespace>
+        <robot_param>robot_description</robot_param>
+        <robot_param_node>robot_state_publisher</robot_param_node>
+        <period>0.001</period>
+      </plugin>
+    </gazebo>
+
+    <gazebo>
+      <plugin name="joint_state_publisher" filename="libgazebo_ros_joint_state_publisher.so">
+        <robot_namespace>/humanoid_robot</robot_namespace>
+        <joint_name>hip_joint</joint_name>
+        <update_rate>30</update_rate>
+      </plugin>
+    </gazebo>
+  </model>
+</sdf>
+```
+
+## Converting Between URDF and SDF
+
+### Converting URDF to SDF
+```bash
+# Convert URDF to SDF
+gz sdf -p path/to/robot.urdf > robot.sdf
+
+# Or using xacro first if needed
+xacro robot.urdf.xacro > robot.urdf
+gz sdf -p robot.urdf > robot.sdf
+```
+
+### Using URDF Directly in Gazebo
+Gazebo can directly load URDF files, but they are internally converted to SDF:
+
+```xml
+<!-- In a world file, include URDF as a model -->
+<include>
+  <name>humanoid_robot</name>
+  <uri>file://path/to/robot.urdf</uri>
+  <pose>0 0 1 0 0 0</pose>
+</include>
+```
+
+## Advanced SDF for Humanoid Simulation
+
+### Multi-Body Dynamics
+```xml
+<sdf version="1.7">
+  <model name="humanoid_with_objects">
+    <!-- Humanoid robot -->
+    <include>
+      <uri>model://humanoid_robot</uri>
+      <name>robot1</name>
+      <pose>0 0 1 0 0 0</pose>
+    </include>
+
+    <!-- Objects to interact with -->
+    <model name="box">
+      <link name="box_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia>
+            <ixx>0.01</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>0.01</iyy>
+            <iyz>0</iyz>
+            <izz>0.01</izz>
+          </inertia>
+        </inertial>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.1 0.1 0.1</size>
+            </box>
+          </geometry>
+        </visual>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.1 0.1 0.1</size>
+            </box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+  </model>
+</sdf>
+```
+
+### Custom Physics Properties
+```xml
+<model name="humanoid_robot">
+  <!-- Enable self-collision -->
+  <self_collide>true</self_collide>
+
+  <!-- Enable gravity -->
+  <gravity>1</gravity>
+
+  <!-- Set static (no gravity, no dynamics) -->
+  <static>false</static>
+
+  <!-- Enable kinematic mode (position-controlled) -->
+  <kinematic>false</kinematic>
+
+  <!-- Link-specific properties -->
+  <link name="torso">
+    <enable_wind>true</enable_wind>
+    <velocity_decay>
+      <linear>0.01</linear>
+      <angular>0.01</angular>
+    </velocity_decay>
+  </link>
+</model>
+```
+
+## SDF for Complex Environments
+
+### Indoor Environment Example
+```xml
+<sdf version="1.7">
+  <world name="indoor_lab">
+    <!-- Physics engine -->
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <!-- Ground plane -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- Lighting -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- Walls -->
+    <model name="wall_1">
+      <pose>5 0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.1 10 3</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.1 10 3</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+          </material>
+        </visual>
+        <inertial>
+          <mass>100</mass>
+          <inertia>
+            <ixx>100</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>100</iyy>
+            <iyz>0</iyz>
+            <izz>100</izz>
+          </inertia>
+        </inertial>
+      </link>
+    </model>
+
+    <!-- Furniture -->
+    <model name="table">
+      <pose>-2 -1 0.4 0 0 0</pose>
+      <link name="table_top">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>1.2 0.6 0.02</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>1.2 0.6 0.02</size>
+            </box>
+          </geometry>
+        </visual>
+        <inertial>
+          <mass>10</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+      </link>
+      <link name="leg_1">
+        <pose>0.5 0.25 -0.39 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.05 0.05 0.8</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.05 0.05 0.8</size>
+            </box>
+          </geometry>
+        </visual>
+        <inertial>
+          <mass>2</mass>
+          <inertia>
+            <ixx>0.1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>0.1</iyy>
+            <iyz>0</iyz>
+            <izz>0.1</izz>
+          </inertia>
+        </inertial>
+      </link>
+      <!-- Additional legs... -->
+    </model>
+
+    <!-- Humanoid robot -->
+    <include>
+      <uri>model://humanoid_robot</uri>
+      <name>test_robot</name>
+      <pose>0 0 1 0 0 0</pose>
+    </include>
+  </world>
+</sdf>
+```
+
+## Tools for Working with SDF
+
+### SDF Validation
+```bash
+# Validate SDF file
+gz sdf -k path/to/file.sdf
+
+# Print SDF to console
+gz sdf -p path/to/file.sdf
+```
+
+### SDF Schema
+SDF files follow the schema defined at: http://sdformat.org/
+
+### Visualization Tools
+- **Gazebo GUI**: Load and visualize SDF files
+- **gz model**: Command-line tool to work with models
+- **Custom parsers**: Python/C++ libraries for programmatic access
+
+## SDF in ROS 2 Workflows
+
+### Launch File Integration
+```python
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
+
+def generate_launch_description():
+    world_arg = DeclareLaunchArgument(
+        'world',
+        default_value=[PathJoinSubstitution([
+            FindPackageShare('my_robot_gazebo'),
+            'worlds',
+            'indoor_lab.sdf'
+        ])],
+        description='SDF world file'
+    )
+
+    # Launch Gazebo with custom world
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('gazebo_ros'),
+                'launch',
+                'gazebo.launch.py'
+            ])
+        ]),
+        launch_arguments={
+            'world': LaunchConfiguration('world'),
+            'gui': 'true',
+            'verbose': 'false',
+        }.items()
+    )
+
+    return LaunchDescription([
+        world_arg,
+        gazebo
+    ])
+```
+
+### Programmatic SDF Generation
+```python
+import xml.etree.ElementTree as ET
+
+def create_sdf_robot(robot_name, links, joints):
+    """Create SDF robot programmatically"""
+    sdf = ET.Element('sdf', version='1.7')
+    model = ET.SubElement(sdf, 'model', name=robot_name)
+
+    # Add links
+    for link_data in links:
+        link = ET.SubElement(model, 'link', name=link_data['name'])
+
+        # Add inertial
+        inertial = ET.SubElement(link, 'inertial')
+        mass = ET.SubElement(inertial, 'mass')
+        mass.text = str(link_data['mass'])
+
+        # Add visual and collision
+        visual = ET.SubElement(link, 'visual', name='visual')
+        # ... continue building the SDF structure
+
+    return ET.tostring(sdf, encoding='unicode')
+```
+
+## Best Practices for SDF in Humanoid Robotics
+
+### 1. Performance Optimization
+- Use simplified collision geometries
+- Limit the number of complex meshes
+- Optimize update rates for sensors
+
+### 2. Realism vs Performance
+- Balance visual fidelity with simulation speed
+- Use appropriate physics parameters
+- Consider different models for different purposes
+
+### 3. Reusability
+- Create modular SDF components
+- Use includes for common elements
+- Parameterize models when possible
+
+### 4. Validation
+- Test SDF files before deployment
+- Verify physics parameters
+- Check for self-collisions
+
+## Advanced SDF Concepts
+
+### Nested Models
+```xml
+<model name="robot_with_payload">
+  <include>
+    <uri>model://humanoid_robot</uri>
+    <name>base_robot</name>
+  </include>
+
+  <include>
+    <uri>model://object_to_carry</uri>
+    <name>payload</name>
+  </include>
+
+  <!-- Joint to connect them -->
+  <joint name="grasp_joint" type="fixed">
+    <parent>base_robot::left_hand</parent>
+    <child>payload::link</child>
+  </joint>
+</model>
+```
+
+### Custom Plugins
+```xml
+<model name="humanoid_robot">
+  <!-- Custom controller plugin -->
+  <gazebo>
+    <plugin name="balance_controller" filename="libbalance_controller.so">
+      <robot_namespace>/humanoid_robot</robot_namespace>
+      <control_topic>/balance_control</control_topic>
+      <imu_topic>/imu/data</imu_topic>
+      <update_rate>100</update_rate>
+    </plugin>
+  </gazebo>
+</model>
+```
+
+## Converting Real Robot Specifications to SDF
+
+When creating SDF models from real robots:
+
+1. **Measure physical dimensions** accurately
+2. **Calculate inertial properties** using CAD software or estimation
+3. **Determine joint limits** from hardware specifications
+4. **Estimate friction and contact parameters**
+5. **Validate with real robot data** when possible
+
+## Summary
+
+SDF provides a comprehensive format for describing robots and simulation environments beyond what URDF offers. For humanoid robotics, SDF enables detailed physics simulation, sensor modeling, and complex environment creation. Understanding both URDF and SDF allows you to create effective digital twins that accurately represent real-world robot behavior.
+
+## Next Steps
+
+In the next chapter, we'll explore physics simulation and sensor modeling in detail, learning how to create realistic simulation environments for humanoid robots.
+
+---
+
+**Estimated Reading Time**: 27 minutes

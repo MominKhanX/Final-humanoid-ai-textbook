@@ -1,0 +1,355 @@
+---
+title: "Nodes, Topics, and Services"
+description: "Core ROS 2 communication patterns: nodes, topics, and services for robot communication"
+sidebar_position: 2
+---
+
+# Nodes, Topics, and Services
+
+This chapter explores the three fundamental communication patterns in ROS 2: nodes, topics, and services. These patterns form the backbone of robot software architecture, enabling different components to communicate and coordinate their activities.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Create and manage ROS 2 nodes in Python and C++
+- Implement publisher-subscriber communication using topics
+- Create and use services for request-response communication
+- Understand when to use topics vs services
+- Design effective message and service interfaces
+- Debug communication issues in ROS 2
+
+## Nodes: The Building Blocks of ROS 2
+
+A node is the fundamental execution unit in ROS 2. Think of nodes as individual processes that perform specific functions within a larger robot system.
+
+### Node Characteristics
+- **Process-based**: Each node runs in its own process
+- **Single-threaded by default**: One main thread of execution
+- **Communication hub**: Nodes communicate with other nodes through topics, services, and actions
+- **Language-agnostic**: Can be written in C++, Python, or other supported languages
+
+### Node Lifecycle
+```
+Node Creation → Initialization → Spinning → Destruction
+```
+
+### Node Naming and Uniqueness
+- Each node must have a unique name within a ROS 2 domain
+- Names follow namespace conventions (e.g., `/robot1/motors`, `/robot2/sensors`)
+- Duplicate names result in the first node being shutdown
+
+## Topics: Publish-Subscribe Communication
+
+Topics enable asynchronous, one-way communication between nodes using a publish-subscribe pattern.
+
+### Topic Communication Pattern
+```
+[Publisher Node] → [Topic] → [Subscriber Node]
+```
+
+### Key Characteristics
+- **Asynchronous**: Publishers don't wait for subscribers
+- **Decoupled**: Publishers and subscribers don't need to know about each other
+- **Many-to-many**: Multiple publishers and subscribers can use the same topic
+- **Message-based**: Communication occurs through serialized messages
+
+### Quality of Service (QoS) for Topics
+Different QoS profiles can be configured based on application needs:
+
+#### Reliability
+- **Reliable**: All messages are guaranteed to be delivered
+- **Best effort**: Messages may be lost (faster, less overhead)
+
+#### Durability
+- **Transient local**: Late-joining subscribers receive the last message
+- **Volatile**: Only new messages are sent to subscribers
+
+#### History
+- **Keep last N**: Store the last N messages
+- **Keep all**: Store all messages (use with caution)
+
+### Example Use Cases for Topics
+- **Sensor data**: Camera images, LIDAR scans, IMU readings
+- **Robot state**: Joint positions, battery levels, status updates
+- **Control commands**: Velocity commands, joint position targets
+- **Event notifications**: Collision warnings, task completion
+
+## Services: Request-Response Communication
+
+Services enable synchronous, two-way communication using a request-response pattern.
+
+### Service Communication Pattern
+```
+[Client Node] → [Request] → [Server Node]
+[Client Node] ← [Response] ← [Server Node]
+```
+
+### Key Characteristics
+- **Synchronous**: Client waits for response from server
+- **Request-response**: One request generates one response
+- **Stateless**: Each request is independent
+- **Blocking**: Client is blocked until response is received
+
+### Example Use Cases for Services
+- **Robot control**: Send goal, wait for confirmation
+- **Configuration**: Set parameters, get current values
+- **Calibration**: Start calibration, get results
+- **System management**: Start/stop nodes, check system status
+
+## Creating Nodes in Python
+
+### Basic Node Structure
+```python
+import rclpy
+from rclpy.node import Node
+
+class MyRobotNode(Node):
+    def __init__(self):
+        super().__init__('my_robot_node')
+        # Initialize publishers, subscribers, services, etc.
+
+    def destroy_node(self):
+        # Cleanup operations
+        super().destroy_node()
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MyRobotNode()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### Publisher Implementation
+```python
+from std_msgs.msg import String
+
+class PublisherNode(Node):
+    def __init__(self):
+        super().__init__('publisher_node')
+        self.publisher = self.create_publisher(String, 'topic_name', 10)
+        timer_period = 0.5  # seconds
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+
+    def timer_callback(self):
+        msg = String()
+        msg.data = 'Hello World: %d' % self.get_clock().now().nanoseconds
+        self.publisher.publish(msg)
+        self.get_logger().info('Publishing: "%s"' % msg.data)
+```
+
+### Subscriber Implementation
+```python
+from std_msgs.msg import String
+
+class SubscriberNode(Node):
+    def __init__(self):
+        super().__init__('subscriber_node')
+        self.subscription = self.create_subscription(
+            String,
+            'topic_name',
+            self.listener_callback,
+            10)
+        self.subscription  # prevent unused variable warning
+
+    def listener_callback(self, msg):
+        self.get_logger().info('I heard: "%s"' % msg.data)
+```
+
+### Service Server Implementation
+```python
+from example_interfaces.srv import AddTwoInts
+
+class ServiceServer(Node):
+    def __init__(self):
+        super().__init__('service_server')
+        self.srv = self.create_service(AddTwoInts, 'add_two_ints', self.add_two_ints_callback)
+
+    def add_two_ints_callback(self, request, response):
+        response.sum = request.a + request.b
+        self.get_logger().info('Incoming request\na: %d b: %d' % (request.a, request.b))
+        return response
+```
+
+### Service Client Implementation
+```python
+from example_interfaces.srv import AddTwoInts
+
+class ServiceClient(Node):
+    def __init__(self):
+        super().__init__('service_client')
+        self.cli = self.create_client(AddTwoInts, 'add_two_ints')
+        while not self.cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Service not available, waiting again...')
+        self.req = AddTwoInts.Request()
+
+    def send_request(self, a, b):
+        self.req.a = a
+        self.req.b = b
+        future = self.cli.call_async(self.req)
+        return future
+```
+
+## Creating Nodes in C++
+
+### Basic Node Structure
+```cpp
+#include "rclcpp/rclcpp.hpp"
+
+class MyRobotNode : public rclcpp::Node
+{
+public:
+    MyRobotNode() : Node("my_robot_node")
+    {
+        // Initialize publishers, subscribers, services, etc.
+    }
+
+private:
+    // Member variables
+};
+
+int main(int argc, char * argv[])
+{
+    rclpy::init(argc, argv);
+    rclcpp::spin(std::make_shared<MyRobotNode>());
+    rclcpp::shutdown();
+    return 0;
+}
+```
+
+## Message Types and Definitions
+
+### Standard Message Types
+ROS 2 provides many standard message types:
+
+#### Basic Types
+- **std_msgs**: Basic data types (String, Int32, Float64, etc.)
+- **geometry_msgs**: Geometric primitives (Point, Pose, Twist, etc.)
+- **sensor_msgs**: Sensor data (Image, LaserScan, JointState, etc.)
+- **nav_msgs**: Navigation-related messages (Odometry, Path, etc.)
+
+#### Custom Message Types
+Messages can be defined for specific applications:
+
+```bash
+# Create custom message
+# In msg/MyCustomMessage.msg:
+int32 id
+string name
+float64[] values
+geometry_msgs/Point position
+```
+
+### Message Generation
+Custom messages are automatically converted to language-specific code during build.
+
+## Best Practices for Communication Design
+
+### When to Use Topics vs Services
+
+#### Use Topics When:
+- Data is continuously updated (sensor streams)
+- Multiple subscribers need the same data
+- Real-time performance is important
+- Publisher doesn't need to know about subscribers
+- Data loss is acceptable (best effort)
+
+#### Use Services When:
+- Request-response pattern is needed
+- Operation must complete before proceeding
+- Operation is idempotent (same result each time)
+- Need guaranteed delivery
+- Operation is relatively quick
+
+### Naming Conventions
+- **Topics**: Use descriptive names (e.g., `/sensors/camera/image_raw`)
+- **Services**: Use verbs in imperative form (e.g., `/robot/move_to_pose`)
+- **Nodes**: Use descriptive names (e.g., `camera_driver`, `path_planner`)
+
+### QoS Selection Guidelines
+- **Reliable**: Use for critical data (commands, state)
+- **Best effort**: Use for sensor data where some loss is acceptable
+- **Transient local**: Use for parameters that late joiners should receive
+- **Keep last 1**: Use for current state data
+- **Keep last N**: Use for history data (N should be reasonable)
+
+## Debugging Communication
+
+### Useful ROS 2 Commands
+```bash
+# List all nodes
+ros2 node list
+
+# List all topics
+ros2 topic list
+
+# Echo a topic
+ros2 topic echo /topic_name
+
+# Call a service
+ros2 service call /service_name service_type "{request: data}"
+
+# Show topic info
+ros2 topic info /topic_name
+
+# Show service info
+ros2 service info /service_name
+```
+
+### Common Issues and Solutions
+- **Nodes not communicating**: Check if nodes are in the same domain ID
+- **No data flowing**: Verify topic names match exactly
+- **High latency**: Check network configuration and QoS settings
+- **Memory issues**: Monitor history settings and message frequency
+
+## Performance Considerations
+
+### Topic Performance
+- **Message size**: Keep messages small for better performance
+- **Frequency**: Match publishing frequency to actual data rate
+- **QoS settings**: Choose appropriate settings for your application
+- **Intra-process communication**: Use for same-node communication
+
+### Service Performance
+- **Response time**: Keep service callbacks fast
+- **Threading**: Consider using multiple threads for service handling
+- **Load balancing**: For high-load services, consider multiple servers
+
+## ROS 2 in Humanoid Robotics Context
+
+### Sensor Integration
+- **Camera topics**: Stream images for perception
+- **IMU topics**: Publish orientation and acceleration data
+- **Joint state topics**: Publish current joint positions
+- **Force/torque topics**: Publish sensor data for manipulation
+
+### Control Systems
+- **Command topics**: Send velocity or position commands
+- **Service calls**: Request robot to perform specific actions
+- **Action servers**: Handle complex, long-running tasks
+
+### Coordination
+- **Shared topics**: Coordinate between different subsystems
+- **Status services**: Check subsystem health
+- **Configuration services**: Adjust parameters dynamically
+
+## Summary
+
+Nodes, topics, and services form the core communication infrastructure of ROS 2. Understanding these patterns is essential for building distributed robot systems. Topics provide asynchronous, decoupled communication ideal for sensor streams and state updates, while services provide synchronous request-response communication for operations that require completion confirmation.
+
+## Next Steps
+
+In the next chapter, we'll explore building ROS 2 packages with Python, creating complete robot applications using the communication patterns we've learned.
+
+---
+
+**Estimated Reading Time**: 22 minutes

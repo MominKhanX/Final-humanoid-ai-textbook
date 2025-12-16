@@ -1,0 +1,841 @@
+---
+title: "Integrating Gazebo with ROS 2"
+description: "Complete integration of Gazebo simulation with ROS 2 for humanoid robotics"
+sidebar_position: 5
+---
+
+# Integrating Gazebo with ROS 2
+
+This chapter covers the complete integration of Gazebo simulation with ROS 2, focusing on creating a seamless workflow for humanoid robotics development. We'll explore advanced integration techniques, control strategies, and validation methods that bridge simulation and real hardware.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Create complete Gazebo-ROS 2 integration workflows
+- Implement advanced robot controllers for simulation
+- Use ros_control for unified simulation and real robot control
+- Validate simulation results against real robot behavior
+- Implement sim-to-real transfer techniques
+- Debug and optimize Gazebo-ROS 2 integration
+
+## Complete Gazebo-ROS 2 Architecture
+
+### System Overview
+
+The complete Gazebo-ROS 2 integration consists of several key components:
+
+```
+ROS 2 Nodes ←→ ROS 2 Middleware ←→ Gazebo ROS Plugins ←→ Gazebo Physics ←→ Robot Models
+```
+
+### Core Integration Components
+
+1. **Gazebo ROS Bridge**: Handles communication between Gazebo and ROS 2
+2. **Robot State Publisher**: Publishes joint states and transforms
+3. **Controller Manager**: Manages robot controllers
+4. **TF System**: Maintains coordinate frame relationships
+5. **Sensor Publishers**: Publish sensor data to ROS 2 topics
+
+## Advanced Gazebo Plugins for ROS 2
+
+### ros_control Integration
+
+The `gazebo_ros_control` plugin provides the bridge between Gazebo and ros_control:
+
+```xml
+<!-- In your robot URDF -->
+<gazebo>
+  <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+    <robotNamespace>/humanoid_robot</robotNamespace>
+    <robotParam>robot_description</robotParam>
+    <robotSimType>gazebo_ros_control/DefaultRobotHWSim</robotSimType>
+    <legacyModeNS>true</legacyModeNS>
+  </plugin>
+</gazebo>
+```
+
+### Custom Robot Hardware Interface
+
+```cpp
+// custom_robot_hw_sim.h
+#include <gazebo_ros_control/default_robot_hw_sim.h>
+#include <hardware_interface/joint_command_interface.h>
+#include <hardware_interface/robot_hw.h>
+
+class CustomRobotHWSim : public gazebo_ros_control::DefaultRobotHWSim
+{
+public:
+    bool initSim(
+        const std::string& robot_namespace,
+        ros::NodeHandle model_nh,
+        gazebo::physics::ModelPtr parent_model,
+        const urdf::Model *const urdf_model,
+        std::vector<transmission_interface::TransmissionInfo> transmissions) override;
+
+    void readSim(ros::Time time, ros::Duration period) override;
+    void writeSim(ros::Time time, ros::Duration period) override;
+
+private:
+    // Joint handles for position, velocity, effort control
+    std::vector<hardware_interface::JointStateHandle> joint_state_handles_;
+    std::vector<hardware_interface::JointHandle> position_joint_handles_;
+    std::vector<hardware_interface::JointHandle> velocity_joint_handles_;
+    std::vector<hardware_interface::JointHandle> effort_joint_handles_;
+
+    // Gazebo joint pointers
+    std::vector<gazebo::physics::JointPtr> sim_joints_;
+
+    // Control parameters
+    std::vector<double> joint_position_, joint_velocity_, joint_effort_;
+    std::vector<double> joint_position_cmd_, joint_velocity_cmd_, joint_effort_cmd_;
+};
+```
+
+### Joint State Publisher Plugin
+
+```xml
+<gazebo>
+  <plugin name="joint_state_publisher" filename="libgazebo_ros_joint_state_publisher.so">
+    <robotNamespace>/humanoid_robot</robotNamespace>
+    <jointName>left_hip_joint</jointName>
+    <jointName>left_knee_joint</jointName>
+    <jointName>left_ankle_joint</jointName>
+    <!-- Add all joints -->
+    <updateRate>100</updateRate>
+    <alwaysOn>true</alwaysOn>
+  </plugin>
+</gazebo>
+```
+
+## Controller Configuration with ros_control
+
+### Controller Manager Setup
+
+```yaml
+# config/controllers.yaml
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz
+
+    # Joint trajectory controller
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    # Position controllers
+    left_leg_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+    # Velocity controllers
+    right_leg_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+    # Effort controllers
+    head_effort_controller:
+      type: effort_controllers/JointGroupEffortController
+
+# Joint trajectory controller configuration
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - left_hip_joint
+      - left_knee_joint
+      - left_ankle_joint
+      - right_hip_joint
+      - right_knee_joint
+      - right_ankle_joint
+    interface_name: position
+    state_interfaces:
+      - position
+      - velocity
+    command_interfaces:
+      - position
+
+# Position controller configuration
+left_leg_position_controller:
+  ros__parameters:
+    joints:
+      - left_hip_joint
+      - left_knee_joint
+      - left_ankle_joint
+```
+
+### Launch File for Controller Integration
+
+```python
+# launch/gazebo_with_controllers.launch.py
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
+from launch.event_handlers import OnProcessStart
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node, SetParameter
+from launch_ros.substitutions import FindPackageShare
+
+def generate_launch_description():
+    # Declare arguments
+    use_sim_time = LaunchConfiguration('use_sim_time')
+
+    # Get URDF via xacro
+    robot_description_content = Command(
+        [
+            PathJoinSubstitution([FindExecutable(name="xacro")]),
+            " ",
+            PathJoinSubstitution([
+                FindPackageShare("my_robot_description"),
+                "urdf",
+                "humanoid_robot.urdf.xacro",
+            ]),
+        ]
+    )
+    robot_description = {"robot_description": robot_description_content}
+
+    # Robot state publisher
+    robot_state_publisher_node = Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        output='both',
+        parameters=[robot_description, {'use_sim_time': use_sim_time}],
+    )
+
+    # Spawn robot in Gazebo
+    gazebo_spawn_entity = Node(
+        package='gazebo_ros',
+        executable='spawn_entity.py',
+        output='both',
+        arguments=[
+            '-topic', 'robot_description',
+            '-entity', 'humanoid_robot',
+            '-x', '0.0',
+            '-y', '0.0',
+            '-z', '1.0',
+        ],
+    )
+
+    # Load and activate controllers
+    load_joint_state_broadcaster = ExecuteProcess(
+        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
+             'joint_state_broadcaster'],
+        output='screen'
+    )
+
+    load_joint_trajectory_controller = ExecuteProcess(
+        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active',
+             'joint_trajectory_controller'],
+        output='screen'
+    )
+
+    # Controller manager
+    gazebo_ros2_control_node = Node(
+        package='controller_manager',
+        executable='ros2_control_node',
+        parameters=[robot_description,
+                   PathJoinSubstitution([
+                       FindPackageShare("my_robot_control"),
+                       "config",
+                       "controllers.yaml"
+                   ]),
+                   {'use_sim_time': use_sim_time}],
+        output='both',
+    )
+
+    # Launch Gazebo
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('gazebo_ros'),
+                'launch',
+                'gazebo.launch.py'
+            ])
+        ]),
+    )
+
+    return LaunchDescription([
+        # Launch Arguments
+        DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='true',
+            description='Use simulation (Gazebo) clock if true'
+        ),
+
+        # Set parameter to use_sim_time
+        SetParameter('use_sim_time', use_sim_time),
+
+        # Launch nodes
+        gazebo,
+        robot_state_publisher_node,
+        gazebo_ros2_control_node,
+        gazebo_spawn_entity,
+    ])
+```
+
+## Advanced Control Strategies
+
+### Whole-Body Control in Simulation
+
+For humanoid robots, whole-body control is essential:
+
+```python
+import rclpy
+from rclpy.node import Node
+from builtin_interfaces.msg import Duration
+from controller_manager_msgs.srv import SwitchController
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from geometry_msgs.msg import PoseStamped
+import numpy as np
+
+class WholeBodyController(Node):
+    def __init__(self):
+        super().__init__('whole_body_controller')
+
+        # Controller switching service
+        self.switch_controller_client = self.create_client(
+            SwitchController, '/controller_manager/switch_controller')
+
+        # Trajectory publishers for different controllers
+        self.joint_trajectory_publisher = self.create_publisher(
+            JointTrajectory, '/joint_trajectory_controller/joint_trajectory', 10)
+
+        # Balance controller parameters
+        self.com_publisher = self.create_publisher(
+            PoseStamped, '/center_of_mass', 10)
+
+        self.get_logger().info('Whole body controller initialized')
+
+    def switch_controllers(self, start_controllers, stop_controllers):
+        """Switch between different controller sets"""
+        request = SwitchController.Request()
+        request.start_controllers = start_controllers
+        request.stop_controllers = stop_controllers
+        request.strictness = SwitchController.Request.BEST_EFFORT
+
+        future = self.switch_controller_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+        return future.result()
+
+    def send_balance_trajectory(self, target_com_pose, duration=2.0):
+        """Send trajectory for balance control"""
+        trajectory = JointTrajectory()
+        trajectory.joint_names = [
+            'left_hip_joint', 'left_knee_joint', 'left_ankle_joint',
+            'right_hip_joint', 'right_knee_joint', 'right_ankle_joint',
+            'torso_joint'
+        ]
+
+        point = JointTrajectoryPoint()
+
+        # Calculate joint positions for desired CoM
+        joint_positions = self.calculate_balance_positions(target_com_pose)
+        point.positions = joint_positions
+
+        # Set timing
+        point.time_from_start = Duration(sec=int(duration), nanosec=0)
+
+        trajectory.points = [point]
+
+        self.joint_trajectory_publisher.publish(trajectory)
+
+    def calculate_balance_positions(self, target_com_pose):
+        """Calculate joint positions to achieve target center of mass"""
+        # Implement inverse kinematics for balance
+        # This would use libraries like MoveIt! or custom IK solvers
+        pass
+
+    def update_balance(self):
+        """Continuous balance update callback"""
+        # Get current robot state
+        # Calculate current CoM
+        # Determine balance corrections
+        # Send corrective commands
+        pass
+```
+
+### Impedance Control for Humanoid Robots
+
+```python
+class ImpedanceController(Node):
+    def __init__(self):
+        super().__init__('impedance_controller')
+
+        # Impedance parameters
+        self.stiffness = 1000.0  # N/m or N.m/rad
+        self.damping_ratio = 1.0  # Critical damping
+        self.mass = 1.0  # kg or kg.m^2
+
+        # Desired equilibrium position
+        self.desired_position = 0.0
+
+        # State feedback
+        self.current_position = 0.0
+        self.current_velocity = 0.0
+
+        # Control timer
+        self.control_timer = self.create_timer(0.001, self.control_callback)
+
+    def control_callback(self):
+        """Impedance control law: F = K(x_d - x) - B(x_dot)"""
+        # Calculate position and velocity errors
+        pos_error = self.desired_position - self.current_position
+        vel_error = 0.0 - self.current_velocity  # Assuming desired velocity = 0
+
+        # Calculate impedance force
+        spring_force = self.stiffness * pos_error
+        damper_force = self.damping_ratio * 2 * np.sqrt(self.stiffness * self.mass) * vel_error
+        impedance_force = spring_force + damper_force
+
+        # Publish force/torque command
+        self.publish_impedance_command(impedance_force)
+
+    def update_state(self, position, velocity):
+        """Update current state from simulation"""
+        self.current_position = position
+        self.current_velocity = velocity
+
+    def publish_impedance_command(self, force):
+        """Publish impedance control command"""
+        # This would publish to appropriate joint command topic
+        pass
+```
+
+## Sensor Integration and Validation
+
+### Multi-Sensor Fusion in Simulation
+
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Imu, JointState
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf2_ros import TransformBroadcaster
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+class SensorFusionSim(Node):
+    def __init__(self):
+        super().__init__('sensor_fusion_sim')
+
+        # Subscribers for different sensors
+        self.imu_sub = self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
+        self.joint_state_sub = self.create_subscription(JointState, '/joint_states', self.joint_state_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/ground_truth/odom', self.odom_callback, 10)
+
+        # Publisher for fused pose
+        self.pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/fused_pose', 10)
+
+        # State estimation
+        self.position = np.zeros(3)
+        self.orientation = np.array([0, 0, 0, 1])  # quaternion
+        self.velocity = np.zeros(3)
+        self.angular_velocity = np.zeros(3)
+
+        # Covariance matrices
+        self.position_cov = np.eye(3) * 0.1
+        self.orientation_cov = np.eye(4) * 0.01
+
+        self.get_logger().info('Sensor fusion node initialized')
+
+    def imu_callback(self, msg):
+        """Process IMU data for attitude estimation"""
+        # Extract orientation from IMU (if available)
+        self.orientation = np.array([
+            msg.orientation.x,
+            msg.orientation.y,
+            msg.orientation.z,
+            msg.orientation.w
+        ])
+
+        # Extract angular velocity
+        self.angular_velocity = np.array([
+            msg.angular_velocity.x,
+            msg.angular_velocity.y,
+            msg.angular_velocity.z
+        ])
+
+        # Update orientation covariance from IMU
+        self.orientation_cov = np.array(msg.orientation_covariance).reshape(4, 4)
+
+    def joint_state_callback(self, msg):
+        """Process joint states for forward kinematics"""
+        # Calculate robot pose using forward kinematics
+        # This would use robot_description and joint positions
+        pass
+
+    def odom_callback(self, msg):
+        """Process ground truth odometry"""
+        # Update position from ground truth (for validation)
+        self.position = np.array([
+            msg.pose.pose.position.x,
+            msg.pose.pose.position.y,
+            msg.pose.pose.position.z
+        ])
+
+        # Update velocity from ground truth
+        self.velocity = np.array([
+            msg.twist.twist.linear.x,
+            msg.twist.twist.linear.y,
+            msg.twist.twist.linear.z
+        ])
+
+    def fuse_sensors(self):
+        """Fuse sensor data using Kalman filter or similar"""
+        # Implement sensor fusion algorithm
+        # Could use extended Kalman filter, particle filter, etc.
+        pass
+
+    def publish_fused_pose(self):
+        """Publish fused pose estimate"""
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'map'
+
+        # Set pose
+        msg.pose.pose.position.x = self.position[0]
+        msg.pose.pose.position.y = self.position[1]
+        msg.pose.pose.position.z = self.position[2]
+
+        msg.pose.pose.orientation.x = self.orientation[0]
+        msg.pose.pose.orientation.y = self.orientation[1]
+        msg.pose.pose.orientation.z = self.orientation[2]
+        msg.pose.pose.orientation.w = self.orientation[3]
+
+        # Set covariance
+        msg.pose.covariance = self.position_cov.flatten().tolist()
+
+        self.pose_pub.publish(msg)
+```
+
+## Sim-to-Real Transfer Techniques
+
+### Domain Randomization
+
+```python
+import random
+
+class DomainRandomization:
+    def __init__(self):
+        # Physics parameter ranges
+        self.friction_range = (0.4, 1.2)
+        self.mass_variance = 0.1  # ±10% mass variation
+        self.com_offset_range = 0.02  # ±2cm CoM offset
+
+        # Sensor noise parameters
+        self.imu_noise_range = (1e-4, 5e-4)  # variance range
+        self.camera_noise_range = (0.01, 0.05)  # pixel noise
+
+    def randomize_robot(self, robot_model):
+        """Apply randomization to robot model"""
+        # Randomize friction coefficients
+        for link in robot_model.links:
+            if hasattr(link, 'surface'):
+                link.surface.friction.ode.mu = random.uniform(*self.friction_range)
+                link.surface.friction.ode.mu2 = random.uniform(*self.friction_range)
+
+        # Randomize masses
+        for link in robot_model.links:
+            link.inertial.mass *= random.uniform(1-self.mass_variance, 1+self.mass_variance)
+
+        # Randomize center of mass
+        for link in robot_model.links:
+            link.inertial.origin.xyz[0] += random.uniform(-self.com_offset_range, self.com_offset_range)
+            link.inertial.origin.xyz[1] += random.uniform(-self.com_offset_range, self.com_offset_range)
+
+    def randomize_environment(self, world_model):
+        """Apply randomization to environment"""
+        # Randomize floor friction
+        ground_plane = world_model.get_model('ground_plane')
+        ground_plane.surface.friction.ode.mu = random.uniform(0.3, 1.0)
+
+        # Randomize lighting
+        sun = world_model.get_model('sun')
+        sun.light.intensity = random.uniform(0.8, 1.2)
+
+    def randomize_sensors(self, sensor_models):
+        """Apply randomization to sensor models"""
+        for sensor in sensor_models:
+            if sensor.type == 'imu':
+                sensor.noise.linear_acceleration.stddev = random.uniform(*self.imu_noise_range)
+                sensor.noise.angular_velocity.stddev = random.uniform(*self.imu_noise_range)
+            elif sensor.type == 'camera':
+                sensor.noise.mean = 0.0
+                sensor.noise.stddev = random.uniform(*self.camera_noise_range)
+```
+
+### System Identification for Parameter Tuning
+
+```python
+import numpy as np
+from scipy.optimize import minimize
+from scipy import signal
+
+class SystemIdentification:
+    def __init__(self, robot_model):
+        self.robot_model = robot_model
+        self.sim_data = []
+        self.real_data = []
+
+    def collect_step_response_data(self, joint_name, step_input):
+        """Collect step response data for system identification"""
+        # Apply step input to simulation
+        # Record response
+        # Apply same input to real robot
+        # Record response
+        pass
+
+    def identify_model_parameters(self, joint_name):
+        """Identify dynamic parameters using collected data"""
+        # Use prediction error method or similar
+        # to identify mass, damping, stiffness parameters
+
+        def objective_function(params):
+            # Simulate with current parameters
+            sim_response = self.simulate_with_params(joint_name, params)
+
+            # Compare with real data
+            error = np.sum((sim_response - self.real_data)**2)
+            return error
+
+        # Optimize parameters
+        result = minimize(objective_function,
+                        x0=self.get_initial_params(),
+                        method='BFGS')
+
+        return result.x
+
+    def simulate_with_params(self, joint_name, params):
+        """Simulate robot with given parameters"""
+        # Update robot model with new parameters
+        # Run simulation
+        # Return response
+        pass
+
+    def update_simulation_parameters(self, identified_params):
+        """Update simulation with identified parameters"""
+        # Apply identified parameters to simulation model
+        # This improves sim-to-real transfer
+        pass
+```
+
+## Validation and Debugging
+
+### Simulation vs Real Comparison
+
+```python
+import matplotlib.pyplot as plt
+
+class SimulationValidator:
+    def __init__(self):
+        self.sim_data_buffer = []
+        self.real_data_buffer = []
+
+    def add_data_point(self, sim_data, real_data, timestamp):
+        """Add synchronized simulation and real data"""
+        self.sim_data_buffer.append((timestamp, sim_data))
+        self.real_data_buffer.append((timestamp, real_data))
+
+    def validate_kinematics(self):
+        """Validate forward and inverse kinematics"""
+        # Compare joint angles between sim and real
+        # Compare end-effector positions
+        # Calculate RMSE and correlation
+        pass
+
+    def validate_dynamics(self):
+        """Validate dynamic behavior"""
+        # Compare accelerations
+        # Compare forces/torques
+        # Validate conservation of energy
+        pass
+
+    def plot_comparison(self, signal_name):
+        """Plot simulation vs real comparison"""
+        sim_times, sim_values = zip(*[(t, d[signal_name]) for t, d in self.sim_data_buffer])
+        real_times, real_values = zip(*[(t, d[signal_name]) for t, d in self.real_data_buffer])
+
+        plt.figure(figsize=(12, 6))
+        plt.plot(sim_times, sim_values, label='Simulation', alpha=0.7)
+        plt.plot(real_times, real_values, label='Real Robot', alpha=0.7)
+        plt.title(f'{signal_name} Comparison')
+        plt.xlabel('Time (s)')
+        plt.ylabel(signal_name)
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    def calculate_metrics(self):
+        """Calculate validation metrics"""
+        metrics = {}
+
+        # Root Mean Square Error
+        rmse = np.sqrt(np.mean((np.array(self.sim_data_buffer) - np.array(self.real_data_buffer))**2))
+        metrics['rmse'] = rmse
+
+        # Correlation coefficient
+        corr = np.corrcoef(self.sim_data_buffer, self.real_data_buffer)[0, 1]
+        metrics['correlation'] = corr
+
+        # Maximum error
+        max_error = np.max(np.abs(np.array(self.sim_data_buffer) - np.array(self.real_data_buffer)))
+        metrics['max_error'] = max_error
+
+        return metrics
+```
+
+### Debugging Tools and Techniques
+
+```python
+class GazeboDebuggingTools:
+    @staticmethod
+    def check_urdf_validity(urdf_file):
+        """Check if URDF is valid"""
+        try:
+            # Parse URDF
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(urdf_file)
+
+            # Check for common issues
+            root = tree.getroot()
+
+            # Check for duplicate joint names
+            joint_names = [joint.get('name') for joint in root.findall('.//joint')]
+            if len(joint_names) != len(set(joint_names)):
+                print("ERROR: Duplicate joint names found")
+
+            # Check for proper parent-child relationships
+            links = [link.get('name') for link in root.findall('.//link')]
+            for joint in root.findall('.//joint'):
+                parent = joint.find('parent').get('link')
+                child = joint.find('child').get('link')
+                if parent not in links or child not in links:
+                    print(f"ERROR: Joint {joint.get('name')} references non-existent links")
+
+            print("URDF validation passed")
+            return True
+
+        except Exception as e:
+            print(f"URDF validation failed: {e}")
+            return False
+
+    @staticmethod
+    def check_joint_limits(robot_description):
+        """Check if joint limits are reasonable"""
+        # Parse robot description and check joint limits
+        # Ensure limits are not too restrictive or too permissive
+        pass
+
+    @staticmethod
+    def visualize_tf_tree():
+        """Visualize TF tree for debugging"""
+        # Use tf2_tools to visualize the transform tree
+        # ros2 run tf2_tools view_frames
+        pass
+
+    @staticmethod
+    def check_physics_stability():
+        """Check for physics stability issues"""
+        # Monitor simulation for unrealistic accelerations
+        # Check for joint limit violations
+        # Monitor energy conservation
+        pass
+```
+
+## Performance Optimization
+
+### Multi-Threading Configuration
+
+```xml
+<!-- In Gazebo launch file -->
+<node name="gazebo_server" pkg="gazebo_ros" exec="gzserver" output="screen">
+  <param name="enable_multithread_physics" value="true"/>
+  <param name="max_threads" value="4"/>
+  <param name="physics_engine" value="ode"/>
+  <param name="ode_num_threads" value="2"/>
+</node>
+```
+
+### Resource Management
+
+```python
+class ResourceManager:
+    def __init__(self):
+        self.max_models = 50  # Limit active models
+        self.max_sensors = 20  # Limit active sensors
+        self.update_rate = 100  # Hz
+
+    def optimize_simulation(self):
+        """Optimize simulation resources"""
+        # Simplify collision geometries
+        # Reduce sensor update rates
+        # Use Level of Detail for distant objects
+        pass
+
+    def dynamic_resource_allocation(self):
+        """Allocate resources based on current needs"""
+        # Monitor CPU/GPU usage
+        # Adjust update rates dynamically
+        # Activate/deactivate sensors based on relevance
+        pass
+```
+
+## Best Practices for Gazebo-ROS 2 Integration
+
+### 1. Consistent Time Management
+- Use simulation time consistently across all nodes
+- Synchronize clocks between Gazebo and ROS 2
+- Handle time jumps gracefully
+
+### 2. Proper Parameterization
+- Use YAML files for configuration
+- Parameterize physics and sensor settings
+- Make simulation scenarios configurable
+
+### 3. Robust Communication
+- Implement proper error handling
+- Use appropriate QoS settings
+- Monitor communication health
+
+### 4. Validation Workflow
+- Validate simulation against real data
+- Use domain randomization
+- Test edge cases in simulation
+
+## Troubleshooting Common Issues
+
+### Issue: Joint States Not Publishing
+**Solution**: Check joint state publisher plugin configuration and URDF joint names
+
+### Issue: Controllers Not Loading
+**Solution**: Verify controller configuration files and parameter server setup
+
+### Issue: Robot Falls Through Ground
+**Solution**: Check mass, inertia, and collision properties in URDF
+
+### Issue: High CPU Usage
+**Solution**: Reduce physics update rate, simplify collision geometries, limit active models
+
+### Debugging Commands
+```bash
+# Check controller status
+ros2 control list_controllers
+
+# Monitor joint states
+ros2 topic echo /joint_states
+
+# Check TF tree
+ros2 run tf2_tools view_frames
+
+# Monitor Gazebo topics
+ros2 topic list | grep gazebo
+```
+
+## Summary
+
+Complete Gazebo-ROS 2 integration provides a powerful simulation environment for humanoid robotics. The key components include proper plugin configuration, controller management, sensor integration, and validation techniques. Successful integration requires attention to physics parameters, communication protocols, and validation against real hardware. The sim-to-real transfer is enhanced through domain randomization and system identification techniques.
+
+## Next Steps
+
+In the next module, we'll explore NVIDIA Isaac for AI-powered perception and control in humanoid robotics, building on the simulation foundation we've established.
+
+---
+
+**Estimated Reading Time**: 35 minutes

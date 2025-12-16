@@ -1,0 +1,2474 @@
+---
+title: "Training VLA Models for Humanoid Robotics"
+description: "Comprehensive guide to training Vision-Language-Action models specifically for humanoid robot applications, including data collection, model architectures, and deployment strategies"
+sidebar_position: 2
+---
+
+# Training VLA Models for Humanoid Robotics
+
+Welcome to Chapter 2 of Module 4: The Interactive AI Brain! This chapter delves into the practical aspects of training Vision-Language-Action (VLA) models specifically for humanoid robotics applications. We'll explore data collection strategies, model architectures optimized for humanoid tasks, training methodologies, and deployment considerations that make VLA models effective for human-robot interaction.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Design and implement data collection pipelines for humanoid VLA training
+- Understand and implement specialized VLA architectures for humanoid tasks
+- Apply multi-modal learning techniques for vision-language-action integration
+- Implement efficient training strategies for large-scale VLA models
+- Evaluate and fine-tune VLA models for specific humanoid platforms
+- Deploy trained VLA models on humanoid robot hardware
+- Address computational and real-time constraints in humanoid VLA deployment
+
+## Data Collection and Annotation for Humanoid VLA
+
+### Humanoid-Specific Data Requirements
+
+Training VLA models for humanoid robots requires specialized data that captures the unique aspects of humanoid embodiment, including:
+
+1. **Multi-view visual data**: Head, hand, and body cameras providing different perspectives
+2. **Proprioceptive information**: Joint angles, IMU data, and tactile sensors
+3. **Natural language interactions**: Commands and conversations in natural settings
+4. **Human demonstration data**: Expert demonstrations of humanoid tasks
+5. **Social context data**: Interactions with humans in various social settings
+
+```python
+import torch
+import torch.nn as nn
+import numpy as np
+from typing import Dict, List, Tuple, Optional, Iterator
+from dataclasses import dataclass
+import json
+import cv2
+from PIL import Image
+import os
+from torch.utils.data import Dataset, DataLoader
+import threading
+import queue
+
+@dataclass
+class HumanoidVLASample:
+    """Data structure for humanoid VLA training samples"""
+    # Visual data
+    head_camera_image: torch.Tensor  # (3, H, W)
+    left_hand_camera_image: torch.Tensor  # (3, H, W)
+    right_hand_camera_image: torch.Tensor  # (3, H, W)
+    depth_image: Optional[torch.Tensor] = None  # (1, H, W)
+
+    # Language data
+    command_text: str
+    command_tokens: torch.Tensor  # (seq_len,)
+
+    # Action data
+    joint_positions: torch.Tensor  # (num_joints,)
+    joint_velocities: Optional[torch.Tensor] = None  # (num_joints,)
+    cartesian_pose: Optional[torch.Tensor] = None  # (7,) - position + orientation
+
+    # Context data
+    robot_state: Dict[str, float]  # Joint positions, velocities, etc.
+    environment_state: Dict[str, any]  # Object positions, human presence, etc.
+    task_description: str
+    success: bool
+    timestamp: float
+
+class HumanoidDataCollector:
+    """System for collecting humanoid VLA training data"""
+
+    def __init__(self, robot_interface, data_dir: str = "./humanoid_vla_data"):
+        self.robot_interface = robot_interface
+        self.data_dir = data_dir
+        self.samples = []
+        self.data_queue = queue.Queue()
+        self.is_collecting = False
+        self.collection_thread = None
+
+        # Create data directory
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(os.path.join(data_dir, "images"), exist_ok=True)
+
+    def start_data_collection(self):
+        """Start collecting data from the humanoid robot"""
+        self.is_collecting = True
+        self.collection_thread = threading.Thread(target=self._collection_loop)
+        self.collection_thread.start()
+
+    def stop_data_collection(self):
+        """Stop data collection"""
+        self.is_collecting = False
+        if self.collection_thread:
+            self.collection_thread.join()
+
+    def _collection_loop(self):
+        """Main data collection loop"""
+        sample_id = 0
+
+        while self.is_collecting:
+            try:
+                # Collect multi-modal data
+                sample = self._collect_single_sample(sample_id)
+
+                if sample:
+                    # Save sample to file
+                    self._save_sample(sample, sample_id)
+                    sample_id += 1
+
+                # Control collection rate (e.g., 10 Hz)
+                import time
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"Error in data collection: {e}")
+                continue
+
+    def _collect_single_sample(self, sample_id: int) -> Optional[HumanoidVLASample]:
+        """Collect a single VLA sample from the robot"""
+        try:
+            # Get visual data from all cameras
+            head_img = self.robot_interface.get_camera_image('head')
+            left_hand_img = self.robot_interface.get_camera_image('left_hand')
+            right_hand_img = self.robot_interface.get_camera_image('right_hand')
+            depth_img = self.robot_interface.get_depth_image()
+
+            # Get robot state
+            joint_positions = self.robot_interface.get_joint_positions()
+            joint_velocities = self.robot_interface.get_joint_velocities()
+            imu_data = self.robot_interface.get_imu_data()
+
+            # Get environment state (simplified)
+            environment_state = {
+                'object_positions': self.robot_interface.get_object_positions(),
+                'human_positions': self.robot_interface.get_human_positions(),
+                'room_layout': self.robot_interface.get_room_layout()
+            }
+
+            # For demonstration, we'll use a placeholder command
+            # In practice, this would come from human interaction or demonstration
+            command_text = "move forward"  # This would be dynamic
+
+            # Create sample
+            sample = HumanoidVLASample(
+                head_camera_image=self._preprocess_image(head_img),
+                left_hand_camera_image=self._preprocess_image(left_hand_img),
+                right_hand_camera_image=self._preprocess_image(right_hand_img),
+                depth_image=self._preprocess_depth(depth_img) if depth_img is not None else None,
+                command_text=command_text,
+                command_tokens=self._tokenize_command(command_text),
+                joint_positions=torch.tensor(joint_positions, dtype=torch.float32),
+                joint_velocities=torch.tensor(joint_velocities, dtype=torch.float32) if joint_velocities is not None else None,
+                cartesian_pose=self._get_end_effector_pose(),  # Simplified
+                robot_state={
+                    'joint_positions': joint_positions,
+                    'joint_velocities': joint_velocities,
+                    'imu_orientation': imu_data.get('orientation', [0, 0, 0, 1])
+                },
+                environment_state=environment_state,
+                task_description="navigation",
+                success=True,  # Placeholder
+                timestamp=time.time()
+            )
+
+            return sample
+
+        except Exception as e:
+            print(f"Error collecting sample {sample_id}: {e}")
+            return None
+
+    def _preprocess_image(self, img) -> torch.Tensor:
+        """Preprocess camera image for training"""
+        # Convert to tensor and normalize
+        if isinstance(img, np.ndarray):
+            img = Image.fromarray(img)
+
+        # Resize and convert to tensor
+        img = img.resize((224, 224))  # Standard size for vision models
+        img_tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+
+        return img_tensor
+
+    def _preprocess_depth(self, depth_img) -> torch.Tensor:
+        """Preprocess depth image"""
+        if isinstance(depth_img, np.ndarray):
+            depth_tensor = torch.from_numpy(depth_img).unsqueeze(0).float()
+        else:
+            depth_tensor = depth_img.unsqueeze(0) if isinstance(depth_img, torch.Tensor) else depth_img
+
+        return depth_tensor
+
+    def _tokenize_command(self, command: str) -> torch.Tensor:
+        """Tokenize command text"""
+        # Simple tokenization for demonstration
+        vocab = {
+            'move': 1, 'forward': 2, 'backward': 3, 'left': 4, 'right': 5,
+            'pick': 6, 'up': 7, 'place': 8, 'down': 9, 'go': 10,
+            'to': 11, 'the': 12, 'a': 13, 'an': 14, 'object': 15,
+            'cup': 16, 'box': 17, 'table': 18, 'chair': 19, 'kitchen': 20
+        }
+
+        tokens = []
+        for word in command.lower().split():
+            clean_word = ''.join(c for c in word if c.isalnum())
+            tokens.append(vocab.get(clean_word, 0))  # 0 for unknown words
+
+        # Pad to fixed length
+        tokens = tokens[:20] + [0] * max(0, 20 - len(tokens))
+        return torch.tensor(tokens, dtype=torch.long)
+
+    def _get_end_effector_pose(self) -> torch.Tensor:
+        """Get end effector pose (simplified)"""
+        # This would compute actual pose from kinematics
+        return torch.zeros(7, dtype=torch.float32)  # [x, y, z, qw, qx, qy, qz]
+
+    def _save_sample(self, sample: HumanoidVLASample, sample_id: int):
+        """Save sample to file"""
+        # Save images
+        img_dir = os.path.join(self.data_dir, "images")
+
+        # Convert tensors back to images for saving
+        def tensor_to_pil(tensor):
+            # Denormalize and convert back to PIL
+            img_array = (tensor.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+            return Image.fromarray(img_array)
+
+        head_img_path = os.path.join(img_dir, f"head_{sample_id:06d}.png")
+        left_img_path = os.path.join(img_dir, f"left_{sample_id:06d}.png")
+        right_img_path = os.path.join(img_dir, f"right_{sample_id:06d}.png")
+
+        tensor_to_pil(sample.head_camera_image).save(head_img_path)
+        tensor_to_pil(sample.left_hand_camera_image).save(left_img_path)
+        tensor_to_pil(sample.right_hand_camera_image).save(right_img_path)
+
+        # Save metadata as JSON
+        metadata = {
+            'sample_id': sample_id,
+            'command_text': sample.command_text,
+            'command_tokens': sample.command_tokens.tolist(),
+            'joint_positions': sample.joint_positions.tolist(),
+            'joint_velocities': sample.joint_velocities.tolist() if sample.joint_velocities is not None else None,
+            'robot_state': sample.robot_state,
+            'environment_state': sample.environment_state,
+            'task_description': sample.task_description,
+            'success': sample.success,
+            'timestamp': sample.timestamp
+        }
+
+        metadata_path = os.path.join(self.data_dir, f"metadata_{sample_id:06d}.json")
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+class HumanoidVLADataset(Dataset):
+    """Dataset for humanoid VLA training"""
+
+    def __init__(self, data_dir: str, max_samples: Optional[int] = None):
+        self.data_dir = data_dir
+        self.metadata_files = self._find_metadata_files()
+
+        if max_samples:
+            self.metadata_files = self.metadata_files[:max_samples]
+
+    def _find_metadata_files(self) -> List[str]:
+        """Find all metadata files in the data directory"""
+        metadata_files = []
+        for file in os.listdir(self.data_dir):
+            if file.startswith('metadata_') and file.endswith('.json'):
+                metadata_files.append(os.path.join(self.data_dir, file))
+
+        return sorted(metadata_files)
+
+    def __len__(self) -> int:
+        return len(self.metadata_files)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Get a single sample from the dataset"""
+        # Load metadata
+        with open(self.metadata_files[idx], 'r') as f:
+            metadata = json.load(f)
+
+        # Load images
+        sample_id = metadata['sample_id']
+        img_dir = os.path.join(self.data_dir, "images")
+
+        head_img_path = os.path.join(img_dir, f"head_{sample_id:06d}.png")
+        left_img_path = os.path.join(img_dir, f"left_{sample_id:06d}.png")
+        right_img_path = os.path.join(img_dir, f"right_{sample_id:06d}.png")
+
+        # Load and preprocess images
+        head_img = self._load_and_preprocess_image(head_img_path)
+        left_img = self._load_and_preprocess_image(left_img_path)
+        right_img = self._load_and_preprocess_image(right_img_path)
+
+        # Combine visual data
+        visual_data = torch.stack([head_img, left_img, right_img], dim=0)  # (3, C, H, W)
+
+        # Language data
+        command_tokens = torch.tensor(metadata['command_tokens'], dtype=torch.long)
+
+        # Action data
+        joint_positions = torch.tensor(metadata['joint_positions'], dtype=torch.float32)
+
+        return {
+            'visual_data': visual_data,
+            'language_data': command_tokens,
+            'action_data': joint_positions,
+            'robot_state': torch.tensor(list(metadata['robot_state']['joint_positions']), dtype=torch.float32),
+            'environment_state': metadata['environment_state'],
+            'success': metadata['success']
+        }
+
+    def _load_and_preprocess_image(self, img_path: str) -> torch.Tensor:
+        """Load and preprocess a single image"""
+        img = Image.open(img_path).convert('RGB')
+        img = img.resize((224, 224))
+        img_tensor = torch.from_numpy(np.array(img)).permute(2, 0, 1).float() / 255.0
+        return img_tensor
+
+# Example usage of data collection and dataset
+def example_data_collection():
+    """Example of data collection and dataset usage"""
+
+    # This is a simulation - in practice, you would connect to a real robot
+    class MockRobotInterface:
+        def get_camera_image(self, camera_name: str):
+            return np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+
+        def get_depth_image(self):
+            return np.random.rand(480, 640).astype(np.float32)
+
+        def get_joint_positions(self):
+            return [0.1 * i for i in range(28)]  # 28 joints example
+
+        def get_joint_velocities(self):
+            return [0.01 * i for i in range(28)]
+
+        def get_imu_data(self):
+            return {'orientation': [1, 0, 0, 0]}
+
+        def get_object_positions(self):
+            return {'cup': [1.0, 0.5, 0.8]}
+
+        def get_human_positions(self):
+            return {'person1': [0.5, 0.0, 0.0]}
+
+        def get_room_layout(self):
+            return {'table': [1.0, 0.0, 0.0], 'chair': [0.0, 1.0, 0.0]}
+
+    # Create data collector
+    robot_interface = MockRobotInterface()
+    collector = HumanoidDataCollector(robot_interface, "./mock_vla_data")
+
+    print("Starting data collection simulation...")
+
+    # Collect a few samples (in practice, run for longer)
+    import time
+    collector.start_data_collection()
+    time.sleep(2)  # Collect for 2 seconds
+    collector.stop_data_collection()
+
+    print("Data collection completed.")
+
+    # Create dataset
+    if os.path.exists("./mock_vla_data"):
+        dataset = HumanoidVLADataset("./mock_vla_data", max_samples=5)
+        print(f"Dataset created with {len(dataset)} samples")
+
+        # Test data loading
+        if len(dataset) > 0:
+            sample = dataset[0]
+            print(f"Sample visual data shape: {sample['visual_data'].shape}")
+            print(f"Sample language data shape: {sample['language_data'].shape}")
+            print(f"Sample action data shape: {sample['action_data'].shape}")
+
+    # Clean up
+    import shutil
+    if os.path.exists("./mock_vla_data"):
+        shutil.rmtree("./mock_vla_data")
+
+example_data_collection()
+```
+
+### Demonstration Learning for Humanoid VLA
+
+Demonstration learning is crucial for humanoid robots, as it allows them to learn from human experts performing tasks in natural ways.
+
+```python
+class DemonstrationLearningCollector:
+    """Collect demonstration data for humanoid VLA models"""
+
+    def __init__(self, robot_interface):
+        self.robot_interface = robot_interface
+        self.demonstrations = []
+        self.current_demonstration = []
+        self.is_recording = False
+
+    def start_recording_demonstration(self, task_description: str):
+        """Start recording a new demonstration"""
+        self.current_demonstration = []
+        self.is_recording = True
+        self.task_description = task_description
+        print(f"Started recording demonstration for: {task_description}")
+
+    def stop_recording_demonstration(self) -> List[Dict]:
+        """Stop recording and return the demonstration"""
+        self.is_recording = False
+        demo = self.current_demonstration.copy()
+        self.demonstrations.append({
+            'demonstration': demo,
+            'task_description': self.task_description,
+            'timestamp': time.time()
+        })
+        self.current_demonstration = []
+        print(f"Stopped recording. Collected {len(demo)} steps.")
+        return demo
+
+    def record_step(self, command: str = None):
+        """Record a single step in the demonstration"""
+        if not self.is_recording:
+            return
+
+        try:
+            # Collect current state
+            step_data = {
+                'timestamp': time.time(),
+                'visual_data': {
+                    'head': self.robot_interface.get_camera_image('head'),
+                    'left_hand': self.robot_interface.get_camera_image('left_hand'),
+                    'right_hand': self.robot_interface.get_camera_image('right_hand')
+                },
+                'robot_state': {
+                    'joint_positions': self.robot_interface.get_joint_positions(),
+                    'joint_velocities': self.robot_interface.get_joint_velocities(),
+                    'end_effector_pose': self.robot_interface.get_end_effector_pose()
+                },
+                'command': command,
+                'action_taken': self.robot_interface.get_current_action(),  # What the demonstrator did
+                'environment_state': self.robot_interface.get_environment_state()
+            }
+
+            self.current_demonstration.append(step_data)
+
+        except Exception as e:
+            print(f"Error recording step: {e}")
+
+    def augment_demonstration(self, demonstration: List[Dict]) -> List[Dict]:
+        """Augment demonstration with additional information and variations"""
+        augmented_demo = []
+
+        for step in demonstration:
+            # Add augmented versions of the step
+            augmented_steps = self._augment_single_step(step)
+            augmented_demo.extend(augmented_steps)
+
+        return augmented_demo
+
+    def _augment_single_step(self, step: Dict) -> List[Dict]:
+        """Augment a single step with variations"""
+        augmented_steps = [step]  # Original step
+
+        # Add visual augmentations
+        for aug_type in ['rotation', 'scaling', 'color_jitter']:
+            augmented_step = step.copy()
+            augmented_step['visual_data'] = self._apply_visual_augmentation(
+                step['visual_data'], aug_type
+            )
+            augmented_steps.append(augmented_step)
+
+        # Add language variations (paraphrasing)
+        if step['command']:
+            paraphrases = self._generate_paraphrases(step['command'])
+            for para in paraphrases:
+                augmented_step = step.copy()
+                augmented_step['command'] = para
+                augmented_steps.append(augmented_step)
+
+        return augmented_steps
+
+    def _apply_visual_augmentation(self, visual_data: Dict, aug_type: str) -> Dict:
+        """Apply visual augmentation to images"""
+        augmented_data = visual_data.copy()
+
+        for camera_name, img in visual_data.items():
+            if aug_type == 'rotation':
+                # Apply random rotation
+                angle = np.random.uniform(-10, 10)  # -10 to 10 degrees
+                augmented_data[camera_name] = self._rotate_image(img, angle)
+            elif aug_type == 'scaling':
+                # Apply random scaling
+                scale = np.random.uniform(0.9, 1.1)  # 90% to 110% scale
+                augmented_data[camera_name] = self._scale_image(img, scale)
+            elif aug_type == 'color_jitter':
+                # Apply color jittering
+                augmented_data[camera_name] = self._jitter_colors(img)
+
+        return augmented_data
+
+    def _rotate_image(self, img, angle):
+        """Rotate image by given angle"""
+        # This is a simplified implementation
+        # In practice, use OpenCV or PIL for proper rotation
+        return img
+
+    def _scale_image(self, img, scale):
+        """Scale image by given factor"""
+        # This is a simplified implementation
+        return img
+
+    def _jitter_colors(self, img):
+        """Apply color jittering"""
+        # This is a simplified implementation
+        return img
+
+    def _generate_paraphrases(self, command: str) -> List[str]:
+        """Generate paraphrases of a command"""
+        # Simple paraphrase generation for demonstration
+        paraphrases = []
+
+        # Example paraphrases for common commands
+        command_lower = command.lower()
+
+        if 'pick up' in command_lower:
+            paraphrases.append(command.replace('pick up', 'grasp'))
+            paraphrases.append(command.replace('pick up', 'take'))
+        elif 'move to' in command_lower:
+            paraphrases.append(command.replace('move to', 'go to'))
+            paraphrases.append(command.replace('move to', 'navigate to'))
+
+        return paraphrases
+
+class HumanoidDemoDataset(Dataset):
+    """Dataset for demonstration-based humanoid VLA training"""
+
+    def __init__(self, demonstrations: List[Dict], transform=None):
+        self.demonstrations = demonstrations
+        self.transform = transform
+        self.flattened_steps = []
+
+        # Flatten all demonstration steps
+        for demo in demonstrations:
+            for step in demo['demonstration']:
+                self.flattened_steps.append({
+                    'demo_data': step,
+                    'task': demo['task_description']
+                })
+
+    def __len__(self):
+        return len(self.flattened_steps)
+
+    def __getitem__(self, idx):
+        step_data = self.flattened_steps[idx]['demo_data']
+        task = self.flattened_steps[idx]['task']
+
+        # Process visual data
+        visual_tensors = []
+        for cam_name, img in step_data['visual_data'].items():
+            if isinstance(img, np.ndarray):
+                img_tensor = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+            else:
+                img_tensor = img
+            visual_tensors.append(img_tensor)
+
+        visual_data = torch.stack(visual_tensors, dim=0)
+
+        # Process language data
+        command_tokens = self._tokenize_command(step_data['command'])
+
+        # Process action data
+        action_data = torch.tensor(step_data['action_taken'], dtype=torch.float32)
+
+        return {
+            'visual_data': visual_data,
+            'language_data': command_tokens,
+            'action_data': action_data,
+            'robot_state': torch.tensor(step_data['robot_state']['joint_positions'], dtype=torch.float32),
+            'task_type': task
+        }
+
+    def _tokenize_command(self, command: str) -> torch.Tensor:
+        """Tokenize command text"""
+        # Reuse tokenization logic from earlier
+        vocab = {
+            'move': 1, 'forward': 2, 'backward': 3, 'left': 4, 'right': 5,
+            'pick': 6, 'up': 7, 'place': 8, 'down': 9, 'go': 10,
+            'to': 11, 'the': 12, 'a': 13, 'an': 14, 'object': 15,
+            'cup': 16, 'box': 17, 'table': 18, 'chair': 19, 'kitchen': 20
+        }
+
+        tokens = []
+        for word in command.lower().split():
+            clean_word = ''.join(c for c in word if c.isalnum())
+            tokens.append(vocab.get(clean_word, 0))
+
+        # Pad to fixed length
+        tokens = tokens[:20] + [0] * max(0, 20 - len(tokens))
+        return torch.tensor(tokens, dtype=torch.long)
+```
+
+## VLA Model Architectures for Humanoid Applications
+
+### Multi-View Vision Processing
+
+Humanoid robots have multiple cameras providing different perspectives, which requires specialized vision processing architectures.
+
+```python
+class MultiViewVisionEncoder(nn.Module):
+    """Vision encoder for multi-view humanoid camera setup"""
+
+    def __init__(self, num_cameras: int = 3, hidden_dim: int = 512):
+        super().__init__()
+        self.num_cameras = num_cameras
+        self.hidden_dim = hidden_dim
+
+        # Separate encoders for each camera view
+        self.camera_encoders = nn.ModuleList([
+            self._create_single_camera_encoder() for _ in range(num_cameras)
+        ])
+
+        # Cross-view attention to integrate information from different views
+        self.cross_view_attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=8,
+            batch_first=True
+        )
+
+        # Fusion layer to combine multi-view features
+        self.fusion_layer = nn.Sequential(
+            nn.Linear(hidden_dim * num_cameras, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim)
+        )
+
+        # View-specific positional encoding
+        self.view_positional_encoding = nn.Parameter(
+            torch.randn(num_cameras, hidden_dim)
+        )
+
+    def _create_single_camera_encoder(self) -> nn.Module:
+        """Create encoder for a single camera view"""
+        return nn.Sequential(
+            # CNN backbone for feature extraction
+            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+
+            # Global average pooling
+            nn.AdaptiveAvgPool2d((1, 1)),
+
+            # Projection to hidden dimension
+            nn.Flatten(),
+            nn.Linear(256, self.hidden_dim),
+            nn.ReLU()
+        )
+
+    def forward(self, multi_view_images: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through multi-view vision encoder
+        Args:
+            multi_view_images: (batch_size, num_cameras, channels, height, width)
+        Returns:
+            fused_features: (batch_size, hidden_dim)
+        """
+        batch_size = multi_view_images.size(0)
+        camera_features = []
+
+        # Process each camera view separately
+        for i in range(self.num_cameras):
+            view_images = multi_view_images[:, i]  # (batch, C, H, W)
+            view_features = self.camera_encoders[i](view_images)  # (batch, hidden_dim)
+            camera_features.append(view_features)
+
+        # Stack features: (batch, num_cameras, hidden_dim)
+        stacked_features = torch.stack(camera_features, dim=1)
+
+        # Add view-specific positional encoding
+        positional_encoding = self.view_positional_encoding.unsqueeze(0).expand(batch_size, -1, -1)
+        encoded_features = stacked_features + positional_encoding
+
+        # Apply cross-view attention
+        attended_features, attention_weights = self.cross_view_attention(
+            encoded_features, encoded_features, encoded_features
+        )
+
+        # Residual connection
+        attended_features = attended_features + stacked_features
+
+        # Flatten and fuse features
+        flattened = attended_features.view(batch_size, -1)  # (batch, num_cameras * hidden_dim)
+        fused_features = self.fusion_layer(flattened)
+
+        return fused_features
+
+class HumanoidVLAModel(nn.Module):
+    """Complete VLA model for humanoid robotics"""
+
+    def __init__(self,
+                 num_cameras: int = 3,
+                 vocab_size: int = 10000,
+                 hidden_dim: int = 512,
+                 action_dim: int = 28,  # Example: 28 humanoid joints
+                 num_heads: int = 8,
+                 num_layers: int = 6):
+        super().__init__()
+
+        # Multi-view vision encoder
+        self.vision_encoder = MultiViewVisionEncoder(
+            num_cameras=num_cameras,
+            hidden_dim=hidden_dim
+        )
+
+        # Language encoder
+        self.language_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=num_heads,
+                dim_feedforward=hidden_dim * 4,
+                batch_first=True
+            ),
+            num_layers=num_layers
+        )
+        self.text_embedding = nn.Embedding(vocab_size, hidden_dim)
+        self.text_pos_encoding = nn.Parameter(torch.randn(50, hidden_dim))
+
+        # Proprioceptive encoder for joint states
+        self.proprio_encoder = nn.Sequential(
+            nn.Linear(28 * 2, hidden_dim),  # joint positions + velocities
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+
+        # Multimodal fusion transformer
+        self.fusion_transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=num_heads,
+                dim_feedforward=hidden_dim * 4,
+                batch_first=True,
+                dropout=0.1
+            ),
+            num_layers=num_layers
+        )
+
+        # Action decoder
+        self.action_decoder = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim),
+            nn.Tanh()  # Actions in [-1, 1] range
+        )
+
+        # Task-specific adaptation layers
+        self.task_adapters = nn.ModuleDict()
+
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self,
+                multi_view_images: torch.Tensor,
+                text_tokens: torch.Tensor,
+                proprio_state: torch.Tensor,
+                task_id: Optional[str] = None) -> torch.Tensor:
+        """
+        Forward pass through the humanoid VLA model
+        Args:
+            multi_view_images: (batch, num_cameras, 3, H, W)
+            text_tokens: (batch, seq_len)
+            proprio_state: (batch, joint_dim * 2) - positions and velocities
+            task_id: Optional task identifier for adaptation
+        Returns:
+            actions: (batch, action_dim)
+        """
+        batch_size = multi_view_images.size(0)
+
+        # Encode vision
+        vision_features = self.vision_encoder(multi_view_images)  # (batch, hidden_dim)
+
+        # Encode language
+        text_embedded = self.text_embedding(text_tokens)  # (batch, seq_len, hidden_dim)
+        seq_len = text_embedded.size(1)
+        pos_encoding = self.text_pos_encoding[:seq_len].unsqueeze(0).expand(batch_size, -1, -1)
+        text_features = text_embedded + pos_encoding
+        text_encoded = self.language_encoder(text_features)  # (batch, seq_len, hidden_dim)
+        # Use mean pooling for single representation
+        text_features = text_encoded.mean(dim=1)  # (batch, hidden_dim)
+
+        # Encode proprioceptive state
+        proprio_features = self.proprio_encoder(proprio_state)  # (batch, hidden_dim)
+
+        # Combine all modalities
+        combined_features = torch.stack([
+            vision_features,    # Vision features
+            text_features,      # Language features
+            proprio_features    # Proprioceptive features
+        ], dim=1)  # (batch, 3, hidden_dim)
+
+        # Apply fusion transformer
+        fused_features = self.fusion_transformer(combined_features)
+
+        # Use the first token (or mean) as the integrated representation
+        integrated_features = fused_features.mean(dim=1)  # (batch, hidden_dim)
+
+        # Apply task-specific adaptation if provided
+        if task_id and task_id in self.task_adapters:
+            integrated_features = self.task_adapters[task_id](integrated_features)
+
+        # Add dropout
+        integrated_features = self.dropout(integrated_features)
+
+        # Decode to actions
+        actions = self.action_decoder(integrated_features)
+
+        return actions
+
+    def add_task_adapter(self, task_id: str, bottleneck_dim: int = 128):
+        """Add a task-specific adapter for fine-tuning"""
+        adapter = nn.Sequential(
+            nn.Linear(self.hidden_dim, bottleneck_dim),
+            nn.ReLU(),
+            nn.Linear(bottleneck_dim, self.hidden_dim),
+            nn.LayerNorm(self.hidden_dim)
+        )
+        self.task_adapters[task_id] = adapter
+
+# Example usage of the complete model
+def example_humanoid_vla_model():
+    """Example usage of the humanoid VLA model"""
+
+    # Create model
+    model = HumanoidVLAModel(
+        num_cameras=3,
+        vocab_size=10000,
+        hidden_dim=512,
+        action_dim=28,  # 28 joints for example humanoid
+        num_heads=8,
+        num_layers=6
+    )
+
+    # Create sample inputs
+    batch_size = 2
+    multi_view_images = torch.randn(batch_size, 3, 3, 224, 224)  # 3 cameras, RGB, 224x224
+    text_tokens = torch.randint(0, 10000, (batch_size, 10))  # 10 tokens per sequence
+    proprio_state = torch.randn(batch_size, 28 * 2)  # 28 joints * 2 (pos + vel)
+
+    # Forward pass
+    actions = model(multi_view_images, text_tokens, proprio_state)
+
+    print(f"Input shapes:")
+    print(f"  Multi-view images: {multi_view_images.shape}")
+    print(f"  Text tokens: {text_tokens.shape}")
+    print(f"  Proprioceptive state: {proprio_state.shape}")
+    print(f"Output actions shape: {actions.shape}")
+    print(f"Action range: [{actions.min():.3f}, {actions.max():.3f}]")
+
+example_humanoid_vla_model()
+```
+
+### Hierarchical Action Spaces
+
+Humanoid robots operate at multiple levels of abstraction, requiring hierarchical action spaces that can handle both high-level goals and low-level motor commands.
+
+```python
+class HierarchicalActionSpace:
+    """Hierarchical action space for humanoid robots"""
+
+    def __init__(self, action_space_config: Dict):
+        self.action_space_config = action_space_config
+        self.hierarchy_levels = self._build_hierarchy()
+
+    def _build_hierarchy(self) -> Dict:
+        """Build the hierarchical action space"""
+        return {
+            'high_level': {
+                'type': 'discrete',
+                'actions': ['navigate', 'manipulate', 'communicate', 'wait'],
+                'dimension': 4
+            },
+            'mid_level': {
+                'navigate': {
+                    'type': 'continuous',
+                    'dimension': 3,  # x, y, theta
+                    'range': [(-1, 1), (-1, 1), (-1, 1)]
+                },
+                'manipulate': {
+                    'type': 'continuous',
+                    'dimension': 7,  # end-effector pose (position + orientation)
+                    'range': [(-1, 1)] * 7
+                },
+                'communicate': {
+                    'type': 'discrete',
+                    'actions': ['speak', 'gesture', 'express_emotion'],
+                    'dimension': 3
+                }
+            },
+            'low_level': {
+                'type': 'continuous',
+                'dimension': 28,  # joint positions for example humanoid
+                'range': [(-2.5, 2.5)] * 28  # joint limits in radians
+            }
+        }
+
+    def discretize_action(self, continuous_action: torch.Tensor, level: str) -> torch.Tensor:
+        """Discretize continuous action for specific level"""
+        if level == 'high_level':
+            # Map continuous values to discrete actions
+            action_idx = torch.argmax(continuous_action, dim=-1)
+            return action_idx
+        else:
+            return continuous_action  # Keep continuous for other levels
+
+class HierarchicalVLA(nn.Module):
+    """Hierarchical VLA model with multiple action levels"""
+
+    def __init__(self,
+                 num_cameras: int = 3,
+                 vocab_size: int = 10000,
+                 hidden_dim: int = 512,
+                 action_hierarchy: Optional[HierarchicalActionSpace] = None):
+        super().__init__()
+
+        self.action_hierarchy = action_hierarchy or HierarchicalActionSpace({})
+
+        # Shared backbone for multimodal processing
+        self.shared_encoder = HumanoidVLAModel(
+            num_cameras=num_cameras,
+            vocab_size=vocab_size,
+            hidden_dim=hidden_dim,
+            action_dim=hidden_dim  # Output shared representation
+        )
+
+        # Separate decoders for each hierarchy level
+        self.high_level_decoder = nn.Sequential(
+            nn.Linear(hidden_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, self.action_hierarchy.hierarchy_levels['high_level']['dimension'])
+        )
+
+        self.mid_level_decoders = nn.ModuleDict()
+        for action_type, config in self.action_hierarchy.hierarchy_levels['mid_level'].items():
+            self.mid_level_decoders[action_type] = nn.Sequential(
+                nn.Linear(hidden_dim, 256),
+                nn.ReLU(),
+                nn.Linear(256, config['dimension'])
+            )
+
+        self.low_level_decoder = nn.Sequential(
+            nn.Linear(hidden_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 28)  # 28 joints
+        )
+
+        # Hierarchy selector
+        self.hierarchy_selector = nn.Linear(hidden_dim, 3)  # high, mid, low level selection
+
+    def forward(self,
+                multi_view_images: torch.Tensor,
+                text_tokens: torch.Tensor,
+                proprio_state: torch.Tensor,
+                hierarchy_level: str = 'low') -> Dict[str, torch.Tensor]:
+        """
+        Forward pass with hierarchical action selection
+        Args:
+            multi_view_images: Multi-view camera images
+            text_tokens: Language command tokens
+            proprio_state: Current robot state
+            hierarchy_level: Which level to output ('high', 'mid', 'low', or 'auto')
+        Returns:
+            Dictionary with actions at specified level
+        """
+        # Get shared representation
+        shared_repr = self.shared_encoder(multi_view_images, text_tokens, proprio_state)
+
+        if hierarchy_level == 'auto':
+            # Automatically select hierarchy level
+            level_probs = torch.softmax(self.hierarchy_selector(shared_repr), dim=-1)
+            selected_level_idx = torch.argmax(level_probs, dim=-1)
+            level_names = ['high', 'mid', 'low']
+            hierarchy_level = level_names[selected_level_idx[0].item()]
+
+        results = {'selected_level': hierarchy_level}
+
+        if hierarchy_level == 'high':
+            high_actions = self.high_level_decoder(shared_repr)
+            results['actions'] = high_actions
+            results['action_type'] = 'high_level'
+
+        elif hierarchy_level == 'mid':
+            # Select mid-level action type based on high-level decision
+            high_actions = self.high_level_decoder(shared_repr)
+            high_action_type = torch.argmax(high_actions, dim=-1)
+
+            # For simplicity, use the first valid action type
+            action_types = list(self.mid_level_decoders.keys())
+            mid_action_type = action_types[high_action_type[0].item() % len(action_types)]
+
+            mid_actions = self.mid_level_decoders[mid_action_type](shared_repr)
+            results['actions'] = mid_actions
+            results['action_type'] = f'mid_level_{mid_action_type}'
+
+        else:  # low level
+            low_actions = self.low_level_decoder(shared_repr)
+            results['actions'] = low_actions
+            results['action_type'] = 'low_level_joints'
+
+        return results
+
+def example_hierarchical_vla():
+    """Example of hierarchical VLA model"""
+
+    # Create hierarchical VLA model
+    hierarchy = HierarchicalActionSpace({})
+    model = HierarchicalVLA(action_hierarchy=hierarchy)
+
+    # Sample inputs
+    batch_size = 1
+    multi_view_images = torch.randn(batch_size, 3, 3, 224, 224)
+    text_tokens = torch.randint(0, 10000, (batch_size, 10))
+    proprio_state = torch.randn(batch_size, 28 * 2)
+
+    # Test different hierarchy levels
+    for level in ['high', 'mid', 'low', 'auto']:
+        results = model(multi_view_images, text_tokens, proprio_state, hierarchy_level=level)
+        print(f"{level.upper()} level - Action type: {results['action_type']}, "
+              f"Action shape: {results['actions'].shape}")
+
+example_hierarchical_vla()
+```
+
+## Training Strategies for Humanoid VLA
+
+### Multi-Task Learning Framework
+
+Training VLA models for humanoid robots benefits from multi-task learning, where the model learns to perform multiple related tasks simultaneously.
+
+```python
+class MultiTaskVLATrainer:
+    """Multi-task training framework for humanoid VLA models"""
+
+    def __init__(self,
+                 model: nn.Module,
+                 tasks: List[str],
+                 task_weights: Optional[Dict[str, float]] = None,
+                 learning_rate: float = 1e-4):
+        self.model = model
+        self.tasks = tasks
+        self.task_weights = task_weights or {task: 1.0 for task in tasks}
+
+        # Separate optimizers for different components if needed
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        self.scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+
+        # Task-specific loss functions
+        self.criterion = nn.MSELoss()
+        self.task_criterions = {task: nn.MSELoss() for task in tasks}
+
+        # Performance tracking
+        self.task_losses = {task: [] for task in tasks}
+        self.total_losses = []
+
+    def train_step(self, batch: Dict, task_type: str) -> float:
+        """Single training step for a specific task"""
+        self.model.train()
+
+        # Extract batch data
+        multi_view_images = batch['visual_data']  # (batch, num_cameras, C, H, W)
+        text_tokens = batch['language_data']      # (batch, seq_len)
+        target_actions = batch['action_data']     # (batch, action_dim)
+        proprio_state = batch['robot_state']      # (batch, state_dim)
+
+        if self.scaler is not None:
+            # Mixed precision training
+            with torch.cuda.amp.autocast():
+                outputs = self.model(multi_view_images, text_tokens, proprio_state)
+
+                if isinstance(outputs, dict) and 'actions' in outputs:
+                    predicted_actions = outputs['actions']
+                else:
+                    predicted_actions = outputs
+
+                loss = self.task_criterions[task_type](predicted_actions, target_actions)
+                weighted_loss = loss * self.task_weights.get(task_type, 1.0)
+
+            self.optimizer.zero_grad()
+            self.scaler.scale(weighted_loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            # Standard training
+            outputs = self.model(multi_view_images, text_tokens, proprio_state)
+
+            if isinstance(outputs, dict) and 'actions' in outputs:
+                predicted_actions = outputs['actions']
+            else:
+                predicted_actions = outputs
+
+            loss = self.task_criterions[task_type](predicted_actions, target_actions)
+            weighted_loss = loss * self.task_weights.get(task_type, 1.0)
+
+            self.optimizer.zero_grad()
+            weighted_loss.backward()
+            self.optimizer.step()
+
+        # Track losses
+        self.task_losses[task_type].append(loss.item())
+        self.total_losses.append(weighted_loss.item())
+
+        return weighted_loss.item()
+
+    def train_epoch(self, data_loaders: Dict[str, DataLoader], num_batches: int = 100) -> Dict[str, float]:
+        """Train for one epoch with multiple tasks"""
+        epoch_losses = {task: 0.0 for task in self.tasks}
+        batch_counts = {task: 0 for task in self.tasks}
+
+        # Cycle through tasks
+        task_iterators = {task: iter(dataloader) for task, dataloader in data_loaders.items()}
+
+        for batch_idx in range(num_batches):
+            # Select task (round-robin or weighted random)
+            current_task = self.tasks[batch_idx % len(self.tasks)]
+
+            try:
+                batch = next(task_iterators[current_task])
+                loss = self.train_step(batch, current_task)
+
+                epoch_losses[current_task] += loss
+                batch_counts[current_task] += 1
+
+            except StopIteration:
+                # Reset iterator if dataset is exhausted
+                task_iterators[current_task] = iter(data_loaders[current_task])
+                batch = next(task_iterators[current_task])
+                loss = self.train_step(batch, current_task)
+
+                epoch_losses[current_task] += loss
+                batch_counts[current_task] += 1
+
+        # Calculate average losses per task
+        avg_losses = {
+            task: epoch_losses[task] / batch_counts[task] if batch_counts[task] > 0 else 0.0
+            for task in self.tasks
+        }
+
+        return avg_losses
+
+    def evaluate(self, data_loaders: Dict[str, DataLoader]) -> Dict[str, Dict[str, float]]:
+        """Evaluate model on multiple tasks"""
+        self.model.eval()
+        results = {}
+
+        with torch.no_grad():
+            for task, dataloader in data_loaders.items():
+                task_losses = []
+                task_accuracies = []
+
+                for batch in dataloader:
+                    multi_view_images = batch['visual_data']
+                    text_tokens = batch['language_data']
+                    target_actions = batch['action_data']
+                    proprio_state = batch['robot_state']
+
+                    outputs = self.model(multi_view_images, text_tokens, proprio_state)
+
+                    if isinstance(outputs, dict) and 'actions' in outputs:
+                        predicted_actions = outputs['actions']
+                    else:
+                        predicted_actions = outputs
+
+                    # Calculate loss
+                    loss = self.task_criterions[task](predicted_actions, target_actions)
+                    task_losses.append(loss.item())
+
+                    # Calculate accuracy (simplified)
+                    action_similarity = torch.cosine_similarity(
+                        predicted_actions, target_actions, dim=1
+                    ).mean().item()
+                    task_accuracies.append(action_similarity)
+
+                results[task] = {
+                    'avg_loss': np.mean(task_losses),
+                    'avg_accuracy': np.mean(task_accuracies),
+                    'num_samples': len(task_losses)
+                }
+
+        return results
+
+class CurriculumLearningScheduler:
+    """Curriculum learning for VLA training"""
+
+    def __init__(self, tasks: List[str], difficulty_levels: Dict[str, List[str]]):
+        self.tasks = tasks
+        self.difficulty_levels = difficulty_levels
+        self.current_level = 0
+        self.level_progress = {task: 0.0 for task in tasks}
+
+    def get_current_tasks(self) -> List[str]:
+        """Get tasks appropriate for current difficulty level"""
+        if self.current_level < len(self.difficulty_levels):
+            return list(self.difficulty_levels.keys())[:self.current_level + 1]
+        else:
+            return self.tasks
+
+    def update_level(self, performance_metrics: Dict[str, float]):
+        """Update curriculum level based on performance"""
+        avg_performance = np.mean(list(performance_metrics.values()))
+
+        # Move to next level if performance is good enough
+        if avg_performance > 0.8 and self.current_level < len(self.difficulty_levels) - 1:
+            self.current_level += 1
+            print(f"Advancing to curriculum level {self.current_level + 1}")
+
+def example_multi_task_training():
+    """Example of multi-task VLA training"""
+
+    # Create model
+    model = HumanoidVLAModel(action_dim=28)
+
+    # Define tasks
+    tasks = ['navigation', 'manipulation', 'social_interaction']
+
+    # Create trainer
+    trainer = MultiTaskVLATrainer(model, tasks)
+
+    # Simulate data loaders for each task (in practice, these would be real datasets)
+    class MockTaskDataset(Dataset):
+        def __init__(self, size=100):
+            self.size = size
+
+        def __len__(self):
+            return self.size
+
+        def __getitem__(self, idx):
+            return {
+                'visual_data': torch.randn(2, 3, 3, 224, 224),  # batch of 2
+                'language_data': torch.randint(0, 10000, (2, 10)),
+                'action_data': torch.randn(2, 28),
+                'robot_state': torch.randn(2, 28 * 2)
+            }
+
+    # Create mock data loaders
+    data_loaders = {
+        task: DataLoader(MockTaskDataset(50), batch_size=2, shuffle=True)
+        for task in tasks
+    }
+
+    print("Starting multi-task training...")
+
+    # Train for a few epochs
+    for epoch in range(3):
+        epoch_losses = trainer.train_epoch(data_loaders, num_batches=30)
+        print(f"Epoch {epoch + 1} losses: {epoch_losses}")
+
+    # Evaluate
+    eval_results = trainer.evaluate(data_loaders)
+    print(f"Evaluation results: {eval_results}")
+
+example_multi_task_training()
+```
+
+### Imitation Learning and Reinforcement Learning Integration
+
+Combining imitation learning from demonstrations with reinforcement learning can create more robust VLA models.
+
+```python
+class ImitationReinforcementTrainer:
+    """Training framework combining imitation and reinforcement learning"""
+
+    def __init__(self,
+                 model: nn.Module,
+                 learning_rate: float = 1e-4,
+                 imitation_weight: float = 0.7,
+                 reinforcement_weight: float = 0.3,
+                 entropy_weight: float = 0.01):
+        self.model = model
+        self.imitation_weight = imitation_weight
+        self.reinforcement_weight = reinforcement_weight
+        self.entropy_weight = entropy_weight
+
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        self.imitation_criterion = nn.MSELoss()
+
+        # For RL component
+        self.value_network = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1)
+        )
+        self.value_optimizer = torch.optim.AdamW(self.value_network.parameters(), lr=learning_rate)
+
+    def imitation_loss(self,
+                      multi_view_images: torch.Tensor,
+                      text_tokens: torch.Tensor,
+                      proprio_state: torch.Tensor,
+                      target_actions: torch.Tensor) -> torch.Tensor:
+        """Calculate imitation learning loss"""
+        predicted_actions = self.model(multi_view_images, text_tokens, proprio_state)
+        return self.imitation_criterion(predicted_actions, target_actions)
+
+    def compute_advantages(self, rewards: List[float], values: List[float], gamma: float = 0.99) -> List[float]:
+        """Compute advantages using Generalized Advantage Estimation (GAE)"""
+        advantages = []
+        gae = 0.0
+
+        for i in reversed(range(len(rewards))):
+            if i == len(rewards) - 1:
+                next_value = 0.0
+            else:
+                next_value = values[i + 1]
+
+            delta = rewards[i] + gamma * next_value - values[i]
+            gae = delta + gamma * 0.95 * gae  # Lambda = 0.95 for GAE
+            advantages.insert(0, gae)
+
+        return advantages
+
+    def reinforcement_loss(self,
+                          multi_view_images: torch.Tensor,
+                          text_tokens: torch.Tensor,
+                          proprio_state: torch.Tensor,
+                          actions: torch.Tensor,
+                          advantages: torch.Tensor) -> torch.Tensor:
+        """Calculate reinforcement learning loss"""
+        # Get action probabilities (in practice, model should output both actions and log_probs)
+        new_actions = self.model(multi_view_images, text_tokens, proprio_state)
+
+        # Simple policy gradient loss
+        # In practice, you'd want log probabilities for proper policy gradient
+        action_diff = (actions - new_actions) ** 2
+        policy_loss = (action_diff.mean(dim=1) * advantages).mean()
+
+        return policy_loss
+
+    def train_step(self,
+                   imitation_batch: Optional[Dict] = None,
+                   reinforcement_batch: Optional[Dict] = None,
+                   rewards: Optional[List[float]] = None) -> Dict[str, float]:
+        """Single training step combining imitation and reinforcement learning"""
+
+        total_loss = 0.0
+        losses = {}
+
+        # Imitation learning component
+        if imitation_batch is not None:
+            im_loss = self.imitation_loss(
+                imitation_batch['visual_data'],
+                imitation_batch['language_data'],
+                imitation_batch['robot_state'],
+                imitation_batch['action_data']
+            )
+            im_loss_weighted = self.imitation_weight * im_loss
+            total_loss += im_loss_weighted
+            losses['imitation'] = im_loss_weighted.item()
+
+        # Reinforcement learning component
+        if reinforcement_batch is not None and rewards is not None:
+            # Get current values
+            with torch.no_grad():
+                shared_repr = self.model.shared_encoder(
+                    reinforcement_batch['visual_data'],
+                    reinforcement_batch['language_data'],
+                    reinforcement_batch['robot_state']
+                )
+                values = self.value_network(shared_repr).squeeze(-1).tolist()
+
+            # Compute advantages
+            advantages = self.compute_advantages(rewards, values)
+            advantages_tensor = torch.tensor(advantages, dtype=torch.float32, device=shared_repr.device)
+
+            # Calculate RL loss
+            rl_loss = self.reinforcement_loss(
+                reinforcement_batch['visual_data'],
+                reinforcement_batch['language_data'],
+                reinforcement_batch['robot_state'],
+                reinforcement_batch['action_data'],  # Previous actions
+                advantages_tensor
+            )
+            rl_loss_weighted = self.reinforcement_weight * rl_loss
+            total_loss += rl_loss_weighted
+            losses['reinforcement'] = rl_loss_weighted.item()
+
+        # Update parameters
+        self.optimizer.zero_grad()
+        if reinforcement_batch is not None:
+            self.value_optimizer.zero_grad()
+
+        total_loss.backward()
+
+        self.optimizer.step()
+        if reinforcement_batch is not None:
+            self.value_optimizer.step()
+
+        losses['total'] = total_loss.item()
+        return losses
+
+class HumanoidEnvironmentSimulator:
+    """Simulator for humanoid robot environment interactions"""
+
+    def __init__(self):
+        self.current_state = {
+            'joint_positions': [0.0] * 28,
+            'joint_velocities': [0.0] * 28,
+            'end_effector_pos': [0.0, 0.0, 1.0],
+            'object_positions': {'cup': [1.0, 0.5, 0.8]},
+            'human_positions': {}
+        }
+        self.episode_step = 0
+
+    def step(self, action: torch.Tensor) -> Tuple[Dict, float, bool, Dict]:
+        """Take a step in the environment"""
+        # Convert action to joint positions
+        joint_commands = action.detach().cpu().numpy()
+
+        # Update state based on action (simplified physics)
+        self._apply_action(joint_commands)
+
+        # Calculate reward
+        reward = self._calculate_reward()
+
+        # Check if episode is done
+        done = self.episode_step >= 100  # Max 100 steps
+        self.episode_step += 1
+
+        # Get next state
+        next_state = self._get_state_dict()
+
+        return next_state, reward, done, {}
+
+    def _apply_action(self, joint_commands: np.ndarray):
+        """Apply action to update robot state"""
+        # Simplified physics update
+        for i in range(min(len(self.current_state['joint_positions']), len(joint_commands))):
+            self.current_state['joint_positions'][i] += joint_commands[i] * 0.01  # Small step
+            # Apply joint limits
+            self.current_state['joint_positions'][i] = np.clip(
+                self.current_state['joint_positions'][i], -2.5, 2.5
+            )
+
+    def _calculate_reward(self) -> float:
+        """Calculate reward for current state"""
+        # Example: reward for reaching a target position
+        target_pos = [1.0, 0.5, 0.8]  # Position of the cup
+        current_pos = self.current_state['end_effector_pos']
+
+        distance = np.linalg.norm(np.array(target_pos) - np.array(current_pos))
+        reward = -distance  # Negative distance as reward
+
+        # Add bonus for being close to target
+        if distance < 0.1:
+            reward += 10.0
+
+        return reward
+
+    def _get_state_dict(self) -> Dict:
+        """Get current state as dictionary"""
+        return {
+            'joint_positions': torch.tensor(self.current_state['joint_positions'], dtype=torch.float32),
+            'joint_velocities': torch.tensor(self.current_state['joint_velocities'], dtype=torch.float32),
+            'end_effector_pos': torch.tensor(self.current_state['end_effector_pos'], dtype=torch.float32),
+            'object_positions': self.current_state['object_positions']
+        }
+
+    def reset(self):
+        """Reset environment to initial state"""
+        self.current_state = {
+            'joint_positions': [0.0] * 28,
+            'joint_velocities': [0.0] * 28,
+            'end_effector_pos': [0.0, 0.0, 1.0],
+            'object_positions': {'cup': [1.0, 0.5, 0.8]},
+            'human_positions': {}
+        }
+        self.episode_step = 0
+
+def example_imitation_reinforcement():
+    """Example combining imitation and reinforcement learning"""
+
+    # Create model and trainer
+    model = HumanoidVLAModel(action_dim=28)
+    trainer = ImitationReinforcementTrainer(model)
+
+    # Create environment simulator
+    env = HumanoidEnvironmentSimulator()
+
+    print("Starting imitation + reinforcement learning...")
+
+    # Simulate training loop
+    for episode in range(5):  # Few episodes for demo
+        env.reset()
+        episode_rewards = []
+        episode_values = []
+
+        # Generate imitation data (simulated expert demonstrations)
+        imitation_data = {
+            'visual_data': torch.randn(1, 3, 3, 224, 224),
+            'language_data': torch.randint(0, 10000, (1, 10)),
+            'robot_state': torch.randn(1, 28 * 2),
+            'action_data': torch.randn(1, 28)  # Expert action
+        }
+
+        # Run RL episode
+        done = False
+        state = env._get_state_dict()
+
+        while not done and len(episode_rewards) < 20:  # Limit steps for demo
+            # Get action from model
+            with torch.no_grad():
+                # Create dummy visual and language inputs for demo
+                visual_input = torch.randn(1, 3, 3, 224, 224)
+                language_input = torch.randint(0, 10000, (1, 10))
+                proprio_input = torch.cat([
+                    state['joint_positions'],
+                    state['joint_velocities']
+                ]).unsqueeze(0)
+
+                action = model(visual_input, language_input, proprio_input)
+
+            # Take step in environment
+            next_state, reward, done, info = env.step(action)
+            episode_rewards.append(reward)
+
+            # Get value estimate for advantage calculation
+            with torch.no_grad():
+                shared_repr = model.shared_encoder(visual_input, language_input, proprio_input)
+                value = trainer.value_network(shared_repr).item()
+                episode_values.append(value)
+
+            state = next_state
+
+        # Train with both imitation and reinforcement components
+        if episode_rewards:
+            losses = trainer.train_step(
+                imitation_batch=imitation_data,
+                reinforcement_batch={
+                    'visual_data': visual_input,
+                    'language_data': language_input,
+                    'robot_state': proprio_input,
+                    'action_data': action  # Previous action taken
+                },
+                rewards=episode_rewards
+            )
+            print(f"Episode {episode + 1} - Losses: {losses}, Total Reward: {sum(episode_rewards):.2f}")
+
+example_imitation_reinforcement()
+```
+
+## Fine-Tuning and Domain Adaptation
+
+### Transfer Learning for Humanoid Platforms
+
+Different humanoid platforms have different kinematic structures, sensors, and capabilities, requiring platform-specific fine-tuning.
+
+```python
+class PlatformAdaptiveVLA(nn.Module):
+    """VLA model adaptable to different humanoid platforms"""
+
+    def __init__(self,
+                 base_model: nn.Module,
+                 platform_config: Dict[str, any],
+                 adaptation_method: str = 'adapter'):
+        super().__init__()
+
+        self.base_model = base_model
+        self.platform_config = platform_config
+        self.adaptation_method = adaptation_method
+
+        # Platform-specific adaptation layers
+        if adaptation_method == 'adapter':
+            self._create_adapter_layers()
+        elif adaptation_method == 'lora':
+            self._create_lora_layers()
+        else:
+            self.platform_projection = nn.Linear(
+                platform_config.get('base_action_dim', 28),
+                platform_config['action_dim']
+            )
+
+    def _create_adapter_layers(self):
+        """Create adapter layers for platform adaptation"""
+        # Vision adapter
+        self.vision_adapter = nn.Sequential(
+            nn.Linear(self.base_model.vision_encoder.hidden_dim,
+                     self.base_model.vision_encoder.hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.base_model.vision_encoder.hidden_dim // 2,
+                     self.base_model.vision_encoder.hidden_dim)
+        )
+
+        # Language adapter
+        self.language_adapter = nn.Sequential(
+            nn.Linear(self.base_model.shared_dim, self.base_model.shared_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.base_model.shared_dim // 2, self.base_model.shared_dim)
+        )
+
+        # Action adapter
+        self.action_adapter = nn.Sequential(
+            nn.Linear(self.base_model.shared_dim, self.base_model.shared_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.base_model.shared_dim // 2,
+                     self.platform_config['action_dim'])
+        )
+
+    def _create_lora_layers(self):
+        """Create LoRA (Low-Rank Adaptation) layers"""
+        # LoRA implementation for vision encoder
+        vision_dim = self.base_model.vision_encoder.hidden_dim
+        lora_rank = 8  # Low rank for efficiency
+
+        self.vision_lora_A = nn.Linear(vision_dim, lora_rank, bias=False)
+        self.vision_lora_B = nn.Linear(lora_rank, vision_dim, bias=False)
+
+        # Initialize LoRA weights
+        nn.init.zeros_(self.vision_lora_B.weight)
+
+        # Similar for other components...
+
+    def forward(self,
+                multi_view_images: torch.Tensor,
+                text_tokens: torch.Tensor,
+                proprio_state: torch.Tensor) -> torch.Tensor:
+        """Forward pass with platform adaptation"""
+
+        if self.adaptation_method == 'adapter':
+            # Get base representation
+            base_repr = self.base_model(multi_view_images, text_tokens, proprio_state)
+
+            # Apply adapters
+            vision_adapted = self.vision_adapter(base_repr)
+            language_adapted = self.language_adapter(base_repr)
+            combined_repr = (vision_adapted + language_adapted) / 2
+
+            # Generate platform-specific actions
+            platform_actions = self.action_adapter(combined_repr)
+
+            return platform_actions
+
+        elif self.adaptation_method == 'lora':
+            # Base forward pass
+            base_output = self.base_model(multi_view_images, text_tokens, proprio_state)
+
+            # Apply LoRA adaptation
+            lora_correction = self.vision_lora_B(self.vision_lora_A(base_output))
+            adapted_output = base_output + lora_correction
+
+            return adapted_output
+
+        else:
+            # Direct projection method
+            base_actions = self.base_model(multi_view_images, text_tokens, proprio_state)
+            platform_actions = self.platform_projection(base_actions)
+            return platform_actions
+
+class DomainAdaptationTrainer:
+    """Trainer for domain adaptation of VLA models"""
+
+    def __init__(self,
+                 model: PlatformAdaptiveVLA,
+                 source_dataset: Dataset,
+                 target_dataset: Dataset,
+                 learning_rate: float = 1e-5):
+        self.model = model
+        self.source_dataset = source_dataset
+        self.target_dataset = target_dataset
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+        # Domain classifier for domain adaptation
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2)  # Source vs Target
+        )
+        self.domain_optimizer = torch.optim.AdamW(
+            self.domain_classifier.parameters(), lr=learning_rate
+        )
+
+        self.criterion = nn.CrossEntropyLoss()
+        self.mse_criterion = nn.MSELoss()
+
+    def train_step(self,
+                   source_batch: Optional[Dict] = None,
+                   target_batch: Optional[Dict] = None,
+                   train_domain_classifier: bool = True) -> Dict[str, float]:
+        """Training step for domain adaptation"""
+
+        losses = {}
+
+        # Task-specific loss on source domain
+        if source_batch is not None:
+            source_pred = self.model(
+                source_batch['visual_data'],
+                source_batch['language_data'],
+                source_batch['robot_state']
+            )
+            source_loss = self.mse_criterion(
+                source_pred, source_batch['action_data']
+            )
+
+            # Backpropagate task loss
+            self.optimizer.zero_grad()
+            source_loss.backward()
+            self.optimizer.step()
+
+            losses['source_task'] = source_loss.item()
+
+        # Domain adaptation loss
+        if source_batch is not None and target_batch is not None:
+            # Get features from source and target
+            with torch.no_grad():
+                source_features = self.model.base_model.shared_encoder(
+                    source_batch['visual_data'],
+                    source_batch['language_data'],
+                    source_batch['robot_state']
+                )
+                target_features = self.model.base_model.shared_encoder(
+                    target_batch['visual_data'],
+                    target_batch['language_data'],
+                    target_batch['robot_state']
+                )
+
+            # Train domain classifier to distinguish domains
+            if train_domain_classifier:
+                source_labels = torch.zeros(source_features.size(0), dtype=torch.long)
+                target_labels = torch.ones(target_features.size(0), dtype=torch.long)
+
+                all_features = torch.cat([source_features, target_features], dim=0)
+                all_labels = torch.cat([source_labels, target_labels], dim=0)
+
+                domain_pred = self.domain_classifier(all_features.detach())
+                domain_loss = self.criterion(domain_pred, all_labels)
+
+                self.domain_optimizer.zero_grad()
+                domain_loss.backward()
+                self.domain_optimizer.step()
+
+                losses['domain_classifier'] = domain_loss.item()
+
+            # Train model to fool domain classifier (domain confusion)
+            domain_pred_target = self.domain_classifier(target_features)
+            domain_labels_target = torch.zeros(target_features.size(0), dtype=torch.long)  # Try to look like source
+            confusion_loss = self.criterion(domain_pred_target, domain_labels_target)
+
+            self.optimizer.zero_grad()
+            confusion_loss.backward()
+            self.optimizer.step()
+
+            losses['domain_confusion'] = confusion_loss.item()
+
+        return losses
+
+def example_platform_adaptation():
+    """Example of platform adaptation"""
+
+    # Create base model
+    base_model = HumanoidVLAModel(action_dim=28)
+
+    # Platform configurations
+    platform_configs = {
+        'atlas': {
+            'action_dim': 28,
+            'joint_names': [f'joint_{i}' for i in range(28)],
+            'sensor_config': {'imu': True, 'force_torque': True}
+        },
+        'valkyrie': {
+            'action_dim': 36,
+            'joint_names': [f'joint_{i}' for i in range(36)],
+            'sensor_config': {'imu': True, 'force_torque': True, 'torso_imu': True}
+        },
+        'nao': {
+            'action_dim': 25,
+            'joint_names': [f'joint_{i}' for i in range(25)],
+            'sensor_config': {'imu': True, 'fsr': True}
+        }
+    }
+
+    # Adapt model to different platforms
+    for platform_name, config in platform_configs.items():
+        print(f"Adapting model to {platform_name} platform...")
+
+        adapted_model = PlatformAdaptiveVLA(
+            base_model=base_model,
+            platform_config=config,
+            adaptation_method='adapter'
+        )
+
+        print(f"  Original action dim: 28 -> {config['action_dim']}")
+        print(f"  Number of trainable params: {sum(p.numel() for p in adapted_model.parameters() if p.requires_grad)}")
+
+    # Example domain adaptation training
+    print("\nStarting domain adaptation...")
+
+    # Mock datasets for source and target domains
+    class MockDataset(Dataset):
+        def __init__(self, size=50):
+            self.size = size
+
+        def __len__(self):
+            return self.size
+
+        def __getitem__(self, idx):
+            return {
+                'visual_data': torch.randn(3, 3, 224, 224),
+                'language_data': torch.randint(0, 10000, (10,)),
+                'robot_state': torch.randn(28 * 2),
+                'action_data': torch.randn(28)
+            }
+
+    source_dataset = MockDataset(30)
+    target_dataset = MockDataset(30)
+
+    # Create adapted model for target platform
+    target_model = PlatformAdaptiveVLA(
+        base_model=base_model,
+        platform_config=platform_configs['valkyrie'],
+        adaptation_method='adapter'
+    )
+
+    # Create domain adaptation trainer
+    trainer = DomainAdaptationTrainer(
+        model=target_model,
+        source_dataset=source_dataset,
+        target_dataset=target_dataset
+    )
+
+    # Simulate adaptation training
+    for epoch in range(3):
+        # Get batches
+        source_loader = DataLoader(source_dataset, batch_size=2, shuffle=True)
+        target_loader = DataLoader(target_dataset, batch_size=2, shuffle=True)
+
+        source_batch = next(iter(source_loader))
+        target_batch = next(iter(target_loader))
+
+        # Train
+        losses = trainer.train_step(source_batch, target_batch)
+        print(f"Epoch {epoch + 1} adaptation losses: {losses}")
+
+example_platform_adaptation()
+```
+
+## Deployment and Optimization
+
+### Real-Time Inference Optimization
+
+Deploying VLA models on humanoid robots requires optimization for real-time performance and computational efficiency.
+
+```python
+class OptimizedVLAInference:
+    """Optimized inference engine for humanoid VLA models"""
+
+    def __init__(self, model: nn.Module, optimization_level: str = 'balanced'):
+        self.model = model
+        self.optimization_level = optimization_level
+        self.compiled_model = None
+        self.inference_cache = {}
+
+        # Apply optimizations based on level
+        self._apply_optimizations()
+
+    def _apply_optimizations(self):
+        """Apply various optimizations based on level"""
+
+        if self.optimization_level == 'performance':
+            # Maximum performance optimizations
+            self._optimize_for_performance()
+        elif self.optimization_level == 'efficiency':
+            # Power and memory efficiency optimizations
+            self._optimize_for_efficiency()
+        else:  # balanced
+            # Balanced optimizations
+            self._optimize_balanced()
+
+    def _optimize_for_performance(self):
+        """Apply performance-focused optimizations"""
+        import torch._dynamo as dynamo
+
+        # Compile model with TorchDynamo for performance
+        self.compiled_model = dynamo.optimize("inductor")(self.model)
+
+        # Enable tensor cores and mixed precision
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+
+    def _optimize_for_efficiency(self):
+        """Apply efficiency-focused optimizations"""
+        # Quantize model for reduced memory and computation
+        self.model = torch.quantization.quantize_dynamic(
+            self.model, {nn.Linear, nn.Conv2d}, dtype=torch.qint8
+        )
+
+    def _optimize_balanced(self):
+        """Apply balanced optimizations"""
+        # Use TorchScript for optimized execution
+        self.model.eval()
+        # self.compiled_model = torch.jit.trace(self.model, example_inputs)  # Would need example inputs
+
+    def preprocess_inputs(self,
+                         images: np.ndarray,
+                         text: str,
+                         robot_state: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Preprocess inputs for efficient inference"""
+
+        # Preprocess images
+        if isinstance(images, np.ndarray):
+            images = torch.from_numpy(images).float().permute(0, 3, 1, 2) / 255.0
+
+        # Preprocess text
+        text_tokens = self._tokenize_text(text)
+
+        # Preprocess robot state
+        if isinstance(robot_state, np.ndarray):
+            robot_state = torch.from_numpy(robot_state).float()
+
+        return images, text_tokens, robot_state
+
+    def _tokenize_text(self, text: str) -> torch.Tensor:
+        """Convert text to token tensor"""
+        # Simple tokenization (in practice, use proper tokenizer)
+        vocab = {
+            'move': 1, 'forward': 2, 'backward': 3, 'left': 4, 'right': 5,
+            'pick': 6, 'up': 7, 'place': 8, 'down': 9, 'go': 10,
+            'to': 11, 'the': 12, 'a': 13, 'an': 14, 'object': 15,
+            'cup': 16, 'box': 17, 'table': 18, 'chair': 19, 'kitchen': 20
+        }
+
+        tokens = []
+        for word in text.lower().split():
+            clean_word = ''.join(c for c in word if c.isalnum())
+            tokens.append(vocab.get(clean_word, 0))
+
+        # Pad to fixed length
+        tokens = tokens[:20] + [0] * max(0, 20 - len(tokens))
+        return torch.tensor(tokens, dtype=torch.long).unsqueeze(0)
+
+    def __call__(self,
+                 multi_view_images: torch.Tensor,
+                 text_tokens: torch.Tensor,
+                 proprio_state: torch.Tensor) -> torch.Tensor:
+        """Optimized inference call"""
+
+        # Use compiled model if available
+        if self.compiled_model is not None:
+            with torch.no_grad():
+                return self.compiled_model(multi_view_images, text_tokens, proprio_state)
+        else:
+            with torch.no_grad():
+                return self.model(multi_view_images, text_tokens, proprio_state)
+
+class RealTimeVLAExecutor:
+    """Real-time execution system for humanoid VLA"""
+
+    def __init__(self, optimized_model: OptimizedVLAInference, control_freq: float = 50.0):
+        self.model = optimized_model
+        self.control_freq = control_freq
+        self.control_period = 1.0 / control_freq
+
+        # Real-time scheduling
+        self.task_queue = queue.Queue()
+        self.is_running = False
+        self.executor_thread = None
+
+        # Performance monitoring
+        self.inference_times = []
+        self.control_delays = []
+
+    def start_execution(self):
+        """Start real-time execution loop"""
+        self.is_running = True
+        self.executor_thread = threading.Thread(target=self._execution_loop)
+        self.executor_thread.start()
+
+    def stop_execution(self):
+        """Stop real-time execution"""
+        self.is_running = False
+        if self.executor_thread:
+            self.executor_thread.join()
+
+    def _execution_loop(self):
+        """Main real-time execution loop"""
+        import time
+
+        while self.is_running:
+            start_time = time.time()
+
+            try:
+                # Get latest command and state
+                if not self.task_queue.empty():
+                    task_data = self.task_queue.get_nowait()
+                    multi_view_images = task_data['images']
+                    text_command = task_data['command']
+                    proprio_state = task_data['state']
+
+                    # Preprocess inputs
+                    images, text_tokens, state_tensor = self.model.preprocess_inputs(
+                        multi_view_images, text_command, proprio_state
+                    )
+
+                    # Run inference
+                    inference_start = time.time()
+                    action = self.model(images.unsqueeze(0), text_tokens, state_tensor.unsqueeze(0))
+                    inference_time = time.time() - inference_start
+
+                    self.inference_times.append(inference_time)
+
+                    # Apply action to robot (simulated)
+                    self._apply_action_to_robot(action.squeeze())
+
+                # Maintain control frequency
+                execution_time = time.time() - start_time
+                sleep_time = max(0, self.control_period - execution_time)
+
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
+                self.control_delays.append(execution_time)
+
+            except queue.Empty:
+                # No tasks available, maintain timing
+                time.sleep(self.control_period)
+            except Exception as e:
+                print(f"Error in execution loop: {e}")
+                time.sleep(0.01)  # Brief pause before continuing
+
+    def _apply_action_to_robot(self, action: torch.Tensor):
+        """Apply computed action to humanoid robot (simulated)"""
+        # This would interface with the actual robot
+        # For simulation, just print the action
+        action_np = action.detach().cpu().numpy()
+        print(f"Applied action with norm: {np.linalg.norm(action_np):.3f}")
+
+    def get_performance_metrics(self) -> Dict[str, float]:
+        """Get real-time performance metrics"""
+        if not self.inference_times:
+            return {'avg_inference_time': 0.0, 'avg_control_delay': 0.0}
+
+        return {
+            'avg_inference_time': np.mean(self.inference_times),
+            'std_inference_time': np.std(self.inference_times),
+            'avg_control_delay': np.mean(self.control_delays),
+            'control_frequency_achieved': 1.0 / np.mean(self.control_delays) if self.control_delays else 0.0,
+            'inference_percent_of_cycle': np.mean(self.inference_times) / self.control_period * 100 if self.control_delays else 0.0
+        }
+
+def example_real_time_deployment():
+    """Example of real-time deployment"""
+
+    # Create and optimize model
+    base_model = HumanoidVLAModel(action_dim=28)
+    optimized_model = OptimizedVLAInference(base_model, optimization_level='performance')
+
+    # Create real-time executor
+    executor = RealTimeVLAExecutor(optimized_model, control_freq=50.0)  # 50 Hz control
+
+    print("Starting real-time VLA execution...")
+    executor.start_execution()
+
+    # Simulate sending tasks to the executor
+    import time
+
+    for i in range(10):  # Send 10 tasks
+        task_data = {
+            'images': np.random.rand(3, 224, 224, 3),  # 3 camera views
+            'command': 'move forward' if i % 2 == 0 else 'pick up object',
+            'state': np.random.rand(28 * 2)  # joint positions + velocities
+        }
+
+        executor.task_queue.put(task_data)
+        time.sleep(0.1)  # Send tasks at 10 Hz
+
+    # Let it run a bit more
+    time.sleep(1.0)
+
+    # Stop execution and get metrics
+    executor.stop_execution()
+
+    metrics = executor.get_performance_metrics()
+    print(f"Performance metrics: {metrics}")
+
+example_real_time_deployment()
+```
+
+## Evaluation and Validation
+
+### Comprehensive Evaluation Framework
+
+Evaluating VLA models for humanoid robotics requires comprehensive assessment across multiple dimensions.
+
+```python
+class HumanoidVLAEvaluator:
+    """Comprehensive evaluation framework for humanoid VLA models"""
+
+    def __init__(self, model: nn.Module, robot_interface = None):
+        self.model = model
+        self.robot_interface = robot_interface
+        self.metrics = {}
+
+        # Evaluation components
+        self.task_performance = TaskPerformanceEvaluator()
+        self.safety_evaluator = SafetyEvaluator()
+        self.interaction_evaluator = InteractionEvaluator()
+        self.efficiency_evaluator = EfficiencyEvaluator()
+
+    def evaluate_complete_system(self, test_scenarios: List[Dict]) -> Dict[str, any]:
+        """Evaluate the complete VLA system"""
+
+        results = {
+            'task_performance': {},
+            'safety_metrics': {},
+            'interaction_quality': {},
+            'efficiency_metrics': {},
+            'overall_score': 0.0
+        }
+
+        for scenario in test_scenarios:
+            scenario_results = self._evaluate_single_scenario(scenario)
+
+            # Aggregate results
+            for key, value in scenario_results.items():
+                if key not in results:
+                    results[key] = {}
+                results[key].update(value)
+
+        # Calculate overall score
+        results['overall_score'] = self._calculate_overall_score(results)
+
+        return results
+
+    def _evaluate_single_scenario(self, scenario: Dict) -> Dict[str, any]:
+        """Evaluate a single test scenario"""
+
+        scenario_results = {}
+
+        # Task performance evaluation
+        if 'task_description' in scenario:
+            task_results = self.task_performance.evaluate(
+                self.model,
+                scenario['task_description'],
+                scenario.get('success_criteria', {})
+            )
+            scenario_results['task_performance'] = task_results
+
+        # Safety evaluation (if robot interface available)
+        if self.robot_interface and 'safety_check' in scenario:
+            safety_results = self.safety_evaluator.evaluate(
+                self.model,
+                self.robot_interface,
+                scenario['safety_check']
+            )
+            scenario_results['safety_metrics'] = safety_results
+
+        # Interaction quality evaluation
+        if 'interaction_sequence' in scenario:
+            interaction_results = self.interaction_evaluator.evaluate(
+                self.model,
+                scenario['interaction_sequence']
+            )
+            scenario_results['interaction_quality'] = interaction_results
+
+        # Efficiency evaluation
+        efficiency_results = self.efficiency_evaluator.evaluate(
+            self.model,
+            scenario.get('computation_limits', {})
+        )
+        scenario_results['efficiency_metrics'] = efficiency_results
+
+        return scenario_results
+
+    def _calculate_overall_score(self, results: Dict) -> float:
+        """Calculate overall system score"""
+
+        # Weighted combination of different metrics
+        weights = {
+            'task_success': 0.4,
+            'safety': 0.25,
+            'interaction_quality': 0.2,
+            'efficiency': 0.15
+        }
+
+        # Calculate weighted score
+        total_score = 0.0
+        total_weight = 0.0
+
+        if 'task_performance' in results:
+            task_score = results['task_performance'].get('success_rate', 0.0)
+            total_score += weights['task_success'] * task_score
+            total_weight += weights['task_success']
+
+        if 'safety_metrics' in results:
+            safety_score = results['safety_metrics'].get('safety_score', 1.0)
+            total_score += weights['safety'] * safety_score
+            total_weight += weights['safety']
+
+        if 'interaction_quality' in results:
+            interaction_score = results['interaction_quality'].get('quality_score', 0.5)
+            total_score += weights['interaction_quality'] * interaction_score
+            total_weight += weights['interaction_quality']
+
+        if 'efficiency_metrics' in results:
+            efficiency_score = results['efficiency_metrics'].get('efficiency_score', 0.5)
+            total_score += weights['efficiency'] * efficiency_score
+            total_weight += weights['efficiency']
+
+        return total_score / total_weight if total_weight > 0 else 0.0
+
+class TaskPerformanceEvaluator:
+    """Evaluate task performance of VLA models"""
+
+    def __init__(self):
+        self.task_success_count = 0
+        self.total_attempts = 0
+
+    def evaluate(self, model, task_description: str, success_criteria: Dict) -> Dict[str, float]:
+        """Evaluate task performance"""
+
+        # Simulate task execution
+        task_success = self._simulate_task_execution(model, task_description, success_criteria)
+
+        if task_success:
+            self.task_success_count += 1
+        self.total_attempts += 1
+
+        success_rate = self.task_success_count / self.total_attempts if self.total_attempts > 0 else 0.0
+
+        return {
+            'success_rate': success_rate,
+            'attempts': self.total_attempts,
+            'successes': self.task_success_count,
+            'task_complexity': self._assess_task_complexity(task_description)
+        }
+
+    def _simulate_task_execution(self, model, task_description: str, success_criteria: Dict) -> bool:
+        """Simulate task execution for evaluation"""
+        # This would connect to real robot or simulator in practice
+        # For demo, return random success based on task complexity
+        complexity = self._assess_task_complexity(task_description)
+        return np.random.random() > complexity * 0.3  # Higher complexity = lower success rate
+
+    def _assess_task_complexity(self, task_description: str) -> float:
+        """Assess task complexity (0-1 scale)"""
+        complexity_keywords = {
+            'simple': ['go', 'stop', 'wait'],
+            'medium': ['pick', 'place', 'navigate'],
+            'complex': ['assemble', 'manipulate', 'interact']
+        }
+
+        task_lower = task_description.lower()
+
+        if any(keyword in task_lower for keyword in complexity_keywords['complex']):
+            return 0.8
+        elif any(keyword in task_lower for keyword in complexity_keywords['medium']):
+            return 0.5
+        else:
+            return 0.2
+
+class SafetyEvaluator:
+    """Evaluate safety aspects of VLA models"""
+
+    def __init__(self):
+        self.safety_violations = 0
+        self.total_safety_checks = 0
+
+    def evaluate(self, model, robot_interface, safety_requirements: Dict) -> Dict[str, float]:
+        """Evaluate safety compliance"""
+
+        # Check various safety aspects
+        safety_checks = [
+            self._check_joint_limits(model, robot_interface),
+            self._check_collision_avoidance(model, robot_interface),
+            self._check_stability(model, robot_interface),
+            self._check_force_limits(model, robot_interface)
+        ]
+
+        safe_checks = sum(safety_checks)
+        total_checks = len(safety_checks)
+
+        safety_score = safe_checks / total_checks if total_checks > 0 else 1.0
+
+        return {
+            'safety_score': safety_score,
+            'passed_checks': safe_checks,
+            'total_checks': total_checks,
+            'safety_violations': self.safety_violations
+        }
+
+    def _check_joint_limits(self, model, robot_interface) -> bool:
+        """Check if actions respect joint limits"""
+        return True  # Simplified
+
+    def _check_collision_avoidance(self, model, robot_interface) -> bool:
+        """Check if actions avoid collisions"""
+        return True  # Simplified
+
+    def _check_stability(self, model, robot_interface) -> bool:
+        """Check if actions maintain robot stability"""
+        return True  # Simplified
+
+    def _check_force_limits(self, model, robot_interface) -> bool:
+        """Check if actions respect force/torque limits"""
+        return True  # Simplified
+
+class InteractionEvaluator:
+    """Evaluate human-robot interaction quality"""
+
+    def __init__(self):
+        self.interaction_metrics = []
+
+    def evaluate(self, model, interaction_sequence: List[Dict]) -> Dict[str, float]:
+        """Evaluate interaction quality"""
+
+        # Evaluate each interaction in the sequence
+        for interaction in interaction_sequence:
+            metric = self._evaluate_single_interaction(model, interaction)
+            self.interaction_metrics.append(metric)
+
+        # Calculate average metrics
+        if self.interaction_metrics:
+            avg_understanding = np.mean([m['understanding_score'] for m in self.interaction_metrics])
+            avg_responsiveness = np.mean([m['responsiveness_score'] for m in self.interaction_metrics])
+            avg_naturalness = np.mean([m['naturalness_score'] for m in self.interaction_metrics])
+        else:
+            avg_understanding = avg_responsiveness = avg_naturalness = 0.0
+
+        quality_score = (avg_understanding + avg_responsiveness + avg_naturalness) / 3
+
+        return {
+            'quality_score': quality_score,
+            'understanding_score': avg_understanding,
+            'responsiveness_score': avg_responsiveness,
+            'naturalness_score': avg_naturalness,
+            'total_interactions': len(interaction_sequence)
+        }
+
+    def _evaluate_single_interaction(self, model, interaction: Dict) -> Dict[str, float]:
+        """Evaluate a single interaction"""
+        # Simulated evaluation
+        return {
+            'understanding_score': np.random.uniform(0.7, 1.0),
+            'responsiveness_score': np.random.uniform(0.6, 1.0),
+            'naturalness_score': np.random.uniform(0.5, 1.0)
+        }
+
+class EfficiencyEvaluator:
+    """Evaluate computational efficiency"""
+
+    def __init__(self):
+        self.inference_times = []
+        self.memory_usage = []
+
+    def evaluate(self, model, computation_limits: Dict) -> Dict[str, float]:
+        """Evaluate computational efficiency"""
+
+        import time
+
+        # Measure inference time
+        test_inputs = self._create_test_inputs()
+
+        for _ in range(10):  # Test multiple times for average
+            start_time = time.time()
+
+            with torch.no_grad():
+                _ = model(*test_inputs)
+
+            inference_time = time.time() - start_time
+            self.inference_times.append(inference_time)
+
+        avg_inference_time = np.mean(self.inference_times) if self.inference_times else 0.0
+        efficiency_score = min(1.0, 0.1 / avg_inference_time) if avg_inference_time > 0 else 0.0  # Higher is better
+
+        return {
+            'efficiency_score': efficiency_score,
+            'avg_inference_time': avg_inference_time,
+            'max_inference_time': max(self.inference_times) if self.inference_times else 0.0,
+            'min_inference_time': min(self.inference_times) if self.inference_times else 0.0,
+            'std_inference_time': np.std(self.inference_times) if len(self.inference_times) > 1 else 0.0
+        }
+
+    def _create_test_inputs(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Create test inputs for efficiency evaluation"""
+        batch_size = 1
+        multi_view_images = torch.randn(batch_size, 3, 3, 224, 224)
+        text_tokens = torch.randint(0, 10000, (batch_size, 10))
+        proprio_state = torch.randn(batch_size, 28 * 2)
+
+        return multi_view_images, text_tokens, proprio_state
+
+def example_comprehensive_evaluation():
+    """Example of comprehensive VLA evaluation"""
+
+    # Create model
+    model = HumanoidVLAModel(action_dim=28)
+
+    # Create evaluator
+    evaluator = HumanoidVLAEvaluator(model)
+
+    # Define test scenarios
+    test_scenarios = [
+        {
+            'task_description': 'navigate to kitchen and pick up cup',
+            'success_criteria': {'reach_target': True, 'grasp_object': True},
+            'interaction_sequence': [
+                {'command': 'go to kitchen', 'expected_action': 'navigation'},
+                {'command': 'pick up cup', 'expected_action': 'manipulation'}
+            ],
+            'computation_limits': {'max_inference_time': 0.05}  # 50ms
+        },
+        {
+            'task_description': 'greet person and shake hands',
+            'success_criteria': {'social_interaction': True, 'safety_compliance': True},
+            'interaction_sequence': [
+                {'command': 'wave hello', 'expected_action': 'social'}
+            ],
+            'computation_limits': {'max_inference_time': 0.05}
+        }
+    ]
+
+    # Run evaluation
+    results = evaluator.evaluate_complete_system(test_scenarios)
+
+    print("Comprehensive VLA Evaluation Results:")
+    print("=" * 50)
+    for key, value in results.items():
+        print(f"{key}: {value}")
+
+    print(f"\nOverall System Score: {results['overall_score']:.3f}")
+
+example_comprehensive_evaluation()
+```
+
+## Summary
+
+Training Vision-Language-Action (VLA) models for humanoid robotics is a complex but rewarding endeavor that requires careful consideration of data collection, model architecture, training strategies, and deployment considerations. This chapter has covered:
+
+### Key Takeaways:
+
+1. **Data Collection**: Multi-view visual data, proprioceptive information, and human demonstrations are crucial for humanoid VLA training
+2. **Model Architecture**: Multi-view vision encoders, hierarchical action spaces, and multimodal fusion are essential components
+3. **Training Strategies**: Multi-task learning, imitation learning combined with reinforcement learning, and curriculum learning improve performance
+4. **Platform Adaptation**: Domain adaptation and platform-specific fine-tuning enable deployment across different humanoid platforms
+5. **Real-time Deployment**: Optimization techniques and real-time execution frameworks are necessary for practical deployment
+6. **Comprehensive Evaluation**: Multi-dimensional evaluation covering task performance, safety, interaction quality, and efficiency is essential
+
+### Best Practices:
+
+- Collect diverse, high-quality training data that reflects real-world usage scenarios
+- Use hierarchical architectures that can operate at multiple levels of abstraction
+- Combine imitation learning with reinforcement learning for robust policy learning
+- Apply domain adaptation techniques for cross-platform deployment
+- Optimize for real-time performance while maintaining safety
+- Implement comprehensive evaluation frameworks that assess all important dimensions
+
+The successful training and deployment of VLA models for humanoid robots enables natural, intuitive human-robot interaction and opens up new possibilities for collaborative robotics in human environments.
+
+## Next Steps
+
+In the next chapter, we'll explore advanced topics in VLA for humanoid robotics, including social interaction capabilities, multi-human scenarios, and integration with cognitive architectures for truly intelligent humanoid behavior.
+
+---
+
+**Estimated Reading Time**: 30 minutes

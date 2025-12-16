@@ -1,0 +1,3556 @@
+---
+title: "Hardware-Accelerated VSLAM for Humanoid Robots"
+description: "Implementing NVIDIA Isaac SLAM and Omniverse Replicator for robust visual-inertial SLAM in humanoid robotics"
+sidebar_position: 5
+---
+
+# Hardware-Accelerated VSLAM for Humanoid Robots
+
+Welcome to Chapter 5 of Module 3: The AI-Robot Brain! In this chapter, we'll explore Hardware-Accelerated Visual-Inertial SLAM (VSLAM) for humanoid robots using NVIDIA's advanced tools. Visual-Inertial SLAM (Simultaneous Localization and Mapping) is crucial for humanoid robots to understand their environment, navigate safely, and perform complex tasks. We'll cover NVIDIA Isaac SLAM, Omniverse Replicator for synthetic data generation, and how to implement robust SLAM systems optimized for humanoid applications.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Understand the principles of Visual-Inertial SLAM and its importance for humanoid robotics
+- Implement NVIDIA Isaac SLAM for real-time localization and mapping
+- Use Omniverse Replicator to generate synthetic training data for SLAM systems
+- Optimize SLAM algorithms for real-time performance on NVIDIA hardware
+- Integrate SLAM with humanoid robot perception and navigation systems
+- Handle SLAM failures and maintain robust operation in challenging environments
+- Evaluate and benchmark SLAM system performance for humanoid applications
+- Implement multi-sensor fusion for enhanced SLAM accuracy
+
+## Introduction to Visual-Inertial SLAM
+
+### Understanding SLAM Fundamentals
+
+Simultaneous Localization and Mapping (SLAM) is a critical capability for autonomous robots, allowing them to build a map of their environment while simultaneously determining their position within that map. For humanoid robots, SLAM is essential for navigation, obstacle avoidance, and interaction with their surroundings.
+
+Visual-Inertial SLAM combines data from cameras and Inertial Measurement Units (IMUs) to achieve robust and accurate localization and mapping. The visual component provides rich environmental information and feature tracking, while the IMU provides high-frequency motion data that helps maintain tracking during fast movements or when visual features are scarce.
+
+### Why Visual-Inertial SLAM for Humanoid Robots?
+
+Humanoid robots present unique challenges and requirements for SLAM systems:
+
+1. **Dynamic Motion**: Humanoid robots experience complex 6-DOF motion patterns that require robust motion estimation
+2. **Height Variation**: Changing heights and perspectives as the robot moves affect visual perception
+3. **Occlusions**: Robot's own body parts can occlude camera views
+4. **Real-time Requirements**: Humanoid robots need immediate responses for balance and navigation
+5. **Multi-sensor Integration**: Integration with other sensors like LiDAR, depth cameras, and joint encoders
+6. **Social Navigation**: Understanding and navigating around humans safely
+
+### SLAM Architecture Components
+
+```python
+import numpy as np
+from typing import Dict, List, Tuple, Optional
+import cv2
+from dataclasses import dataclass
+
+@dataclass
+class SLAMState:
+    """Represents the state of the SLAM system"""
+    position: np.ndarray  # 3D position [x, y, z]
+    orientation: np.ndarray  # Quaternion [w, x, y, z]
+    velocity: np.ndarray  # 3D velocity [vx, vy, vz]
+    covariance: np.ndarray  # State covariance matrix
+    timestamp: float  # Timestamp of state
+
+@dataclass
+class FeaturePoint:
+    """Represents a visual feature point"""
+    id: int
+    position_3d: np.ndarray  # 3D world coordinates
+    position_2d: np.ndarray  # 2D image coordinates
+    descriptor: np.ndarray  # Feature descriptor
+    track_length: int  # Number of frames tracked
+    reprojection_error: float  # Error in reprojection
+
+class VisualInertialSLAM:
+    """Core Visual-Inertial SLAM implementation"""
+
+    def __init__(self):
+        # Core SLAM components
+        self.state = SLAMState(
+            position=np.zeros(3),
+            orientation=np.array([1, 0, 0, 0]),  # Identity quaternion
+            velocity=np.zeros(3),
+            covariance=np.eye(6) * 0.1,
+            timestamp=0.0
+        )
+
+        self.map_points: Dict[int, FeaturePoint] = {}
+        self.keyframes = []
+        self.imu_buffer = []
+
+        # Feature tracking
+        self.feature_detector = cv2.ORB_create(nfeatures=2000)
+        self.descriptor_matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+
+        # IMU integration
+        self.imu_integration = IMUIntegrator()
+
+        # Optimization backend
+        self.backend_optimizer = PoseGraphOptimizer()
+
+    def process_frame(
+        self,
+        image: np.ndarray,
+        imu_data: Dict,
+        timestamp: float
+    ) -> SLAMState:
+        """Process a new frame with image and IMU data"""
+
+        # Step 1: Extract and track features
+        features = self.extract_features(image)
+
+        # Step 2: Integrate IMU data for motion prediction
+        predicted_motion = self.imu_integration.integrate(imu_data, timestamp)
+
+        # Step 3: Estimate pose using visual-inertial fusion
+        estimated_pose = self.estimate_pose(features, predicted_motion)
+
+        # Step 4: Update SLAM state
+        self.state = self.update_state(estimated_pose, timestamp)
+
+        # Step 5: Add keyframe if significant motion detected
+        if self.should_add_keyframe():
+            self.add_keyframe(image, self.state)
+
+        # Step 6: Optimize pose graph
+        self.backend_optimizer.optimize()
+
+        return self.state
+
+    def extract_features(self, image: np.ndarray) -> List[FeaturePoint]:
+        """Extract visual features from image"""
+        # Convert to grayscale if needed
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image
+
+        # Detect keypoints and compute descriptors
+        keypoints = self.feature_detector.detectAndCompute(gray, None)
+
+        if keypoints is None:
+            return []
+
+        kp_list, descriptors = keypoints
+
+        # Convert to FeaturePoint objects
+        features = []
+        for i, (kp, desc) in enumerate(zip(kp_list, descriptors)):
+            feature = FeaturePoint(
+                id=i,
+                position_3d=np.array([0, 0, 0]),  # Will be triangulated later
+                position_2d=np.array([kp.pt[0], kp.pt[1]]),
+                descriptor=desc,
+                track_length=1,
+                reprojection_error=0.0
+            )
+            features.append(feature)
+
+        return features
+
+    def estimate_pose(
+        self,
+        features: List[FeaturePoint],
+        imu_prediction: Dict
+    ) -> Dict:
+        """Estimate camera pose using visual-inertial fusion"""
+
+        # Visual pose estimation (PnP or similar)
+        visual_pose = self.estimate_visual_pose(features)
+
+        # Fuse with IMU prediction
+        fused_pose = self.fuse_visual_inertial(
+            visual_pose,
+            imu_prediction
+        )
+
+        return fused_pose
+
+    def estimate_visual_pose(self, features: List[FeaturePoint]) -> Dict:
+        """Estimate pose using visual features"""
+        # This would implement PnP, direct methods, or other visual pose estimation
+        return {'R': np.eye(3), 't': np.zeros(3), 'success': True}
+
+    def fuse_visual_inertial(
+        self,
+        visual_pose: Dict,
+        imu_prediction: Dict
+    ) -> Dict:
+        """Fuse visual and inertial pose estimates"""
+        # Extended Kalman Filter or optimization-based fusion
+        # This is a simplified version
+        fused_rotation = self.interpolate_rotations(
+            visual_pose['R'],
+            imu_prediction['R'],
+            weight=0.7  # Higher weight for visual when features are good
+        )
+
+        fused_translation = 0.8 * visual_pose['t'] + 0.2 * imu_prediction['t']
+
+        return {
+            'R': fused_rotation,
+            't': fused_translation,
+            'success': visual_pose['success']
+        }
+
+    def interpolate_rotations(self, R1: np.ndarray, R2: np.ndarray, weight: float) -> np.ndarray:
+        """Interpolate between two rotation matrices"""
+        # Convert to quaternions for proper interpolation
+        q1 = self.rotation_matrix_to_quaternion(R1)
+        q2 = self.rotation_matrix_to_quaternion(R2)
+
+        # Spherical linear interpolation (SLERP)
+        q_fused = self.slerp(q1, q2, weight)
+
+        return self.quaternion_to_rotation_matrix(q_fused)
+
+    def rotation_matrix_to_quaternion(self, R: np.ndarray) -> np.ndarray:
+        """Convert rotation matrix to quaternion"""
+        # Implementation of rotation matrix to quaternion conversion
+        trace = np.trace(R)
+        if trace > 0:
+            s = np.sqrt(trace + 1.0) * 2  # s = 4 * qw
+            qw = 0.25 * s
+            qx = (R[2, 1] - R[1, 2]) / s
+            qy = (R[0, 2] - R[2, 0]) / s
+            qz = (R[1, 0] - R[0, 1]) / s
+        else:
+            if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+                s = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2
+                qw = (R[2, 1] - R[1, 2]) / s
+                qx = 0.25 * s
+                qy = (R[0, 1] + R[1, 0]) / s
+                qz = (R[0, 2] + R[2, 0]) / s
+            elif R[1, 1] > R[2, 2]:
+                s = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2
+                qw = (R[0, 2] - R[2, 0]) / s
+                qx = (R[0, 1] + R[1, 0]) / s
+                qy = 0.25 * s
+                qz = (R[1, 2] + R[2, 1]) / s
+            else:
+                s = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2
+                qw = (R[1, 0] - R[0, 1]) / s
+                qx = (R[0, 2] + R[2, 0]) / s
+                qy = (R[1, 2] + R[2, 1]) / s
+                qz = 0.25 * s
+
+        return np.array([qw, qx, qy, qz])
+
+    def quaternion_to_rotation_matrix(self, q: np.ndarray) -> np.ndarray:
+        """Convert quaternion to rotation matrix"""
+        qw, qx, qy, qz = q
+        R = np.array([
+            [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qw*qz), 2*(qx*qz + qw*qy)],
+            [2*(qx*qy + qw*qz), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qw*qx)],
+            [2*(qx*qz - qw*qy), 2*(qy*qz + qw*qx), 1 - 2*(qx**2 + qy**2)]
+        ])
+        return R
+
+    def slerp(self, q1: np.ndarray, q2: np.ndarray, t: float) -> np.ndarray:
+        """Spherical linear interpolation between quaternions"""
+        # Normalize quaternions
+        q1 = q1 / np.linalg.norm(q1)
+        q2 = q2 / np.linalg.norm(q2)
+
+        # Calculate dot product
+        dot = np.dot(q1, q2)
+
+        # If dot product is negative, use negated quaternion
+        if dot < 0.0:
+            q2 = -q2
+            dot = -dot
+
+        # Ensure dot product is within valid range
+        dot = np.clip(dot, -1.0, 1.0)
+
+        # Calculate angle
+        theta_0 = np.arccos(dot)
+        sin_theta_0 = np.sin(theta_0)
+
+        if sin_theta_0 > 0.001:  # Avoid division by zero
+            theta = theta_0 * t
+            sin_theta = np.sin(theta)
+            s1 = np.cos(theta) - dot * sin_theta / sin_theta_0
+            s2 = sin_theta / sin_theta_0
+        else:
+            # Linear interpolation for very small angles
+            s1 = 1.0 - t
+            s2 = t
+
+        return s1 * q1 + s2 * q2
+
+    def update_state(self, pose_estimate: Dict, timestamp: float) -> SLAMState:
+        """Update SLAM state with new pose estimate"""
+        # Convert pose estimate to state representation
+        R = pose_estimate['R']
+        t = pose_estimate['t']
+
+        # Convert rotation matrix to quaternion
+        orientation = self.rotation_matrix_to_quaternion(R)
+
+        # Update state
+        self.state.position = t
+        self.state.orientation = orientation
+        self.state.timestamp = timestamp
+
+        return self.state
+
+    def should_add_keyframe(self) -> bool:
+        """Determine if a new keyframe should be added"""
+        # Criteria for keyframe selection:
+        # - Significant motion (rotation/translation threshold)
+        # - Sufficient time has passed
+        # - Good feature distribution
+        return True  # Simplified for example
+
+    def add_keyframe(self, image: np.ndarray, state: SLAMState):
+        """Add a new keyframe to the map"""
+        keyframe = {
+            'image': image,
+            'state': state,
+            'features': self.extract_features(image)
+        }
+        self.keyframes.append(keyframe)
+
+class IMUIntegrator:
+    """Handles IMU data integration for motion prediction"""
+
+    def __init__(self):
+        self.gravity = np.array([0, 0, -9.81])
+        self.bias_acc = np.zeros(3)
+        self.bias_gyro = np.zeros(3)
+        self.last_timestamp = 0.0
+        self.last_velocity = np.zeros(3)
+        self.last_position = np.zeros(3)
+
+    def integrate(self, imu_data: Dict, timestamp: float) -> Dict:
+        """Integrate IMU data to predict motion"""
+        if self.last_timestamp == 0.0:
+            self.last_timestamp = timestamp
+            return {'R': np.eye(3), 't': np.zeros(3)}
+
+        dt = timestamp - self.last_timestamp
+
+        # Remove biases
+        acc_unbiased = imu_data['acceleration'] - self.bias_acc
+        gyro_unbiased = imu_data['angular_velocity'] - self.bias_gyro
+
+        # Integrate angular velocity to get rotation
+        delta_angle = gyro_unbiased * dt
+        R_delta = self.rodrigues_rotation(delta_angle)
+
+        # Transform acceleration to global frame and integrate
+        acc_global = R_delta @ acc_unbiased + self.gravity
+        delta_velocity = acc_global * dt
+        delta_position = self.last_velocity * dt + 0.5 * acc_global * dt**2
+
+        # Update states
+        self.last_velocity += delta_velocity
+        self.last_position += delta_position
+        self.last_timestamp = timestamp
+
+        return {
+            'R': R_delta,
+            't': delta_position,
+            'velocity': self.last_velocity
+        }
+
+    def rodrigues_rotation(self, angle_axis: np.ndarray) -> np.ndarray:
+        """Convert angle-axis representation to rotation matrix"""
+        angle = np.linalg.norm(angle_axis)
+        if angle < 1e-6:
+            return np.eye(3)
+
+        axis = angle_axis / angle
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        cross_matrix = np.array([
+            [0, -axis[2], axis[1]],
+            [axis[2], 0, -axis[0]],
+            [-axis[1], axis[0], 0]
+        ])
+
+        R = np.eye(3) + sin_a * cross_matrix + (1 - cos_a) * (cross_matrix @ cross_matrix)
+        return R
+
+class PoseGraphOptimizer:
+    """Optimizes pose graph for globally consistent map"""
+
+    def __init__(self):
+        self.poses = []
+        self.constraints = []
+
+    def add_constraint(self, from_id: int, to_id: int, relative_pose: Dict):
+        """Add a relative pose constraint between keyframes"""
+        constraint = {
+            'from': from_id,
+            'to': to_id,
+            'relative_pose': relative_pose
+        }
+        self.constraints.append(constraint)
+
+    def optimize(self):
+        """Optimize the pose graph using bundle adjustment or graph optimization"""
+        # This would implement pose graph optimization
+        # Could use g2o, Ceres Solver, or custom optimization
+        pass
+```
+
+## NVIDIA Isaac SLAM Implementation
+
+### Overview of NVIDIA Isaac SLAM
+
+NVIDIA Isaac SLAM is a comprehensive solution that leverages NVIDIA's GPU acceleration for real-time visual-inertial SLAM. It includes optimized algorithms for feature detection, tracking, pose estimation, and mapping that take advantage of CUDA cores and Tensor cores for maximum performance.
+
+### Setting Up Isaac SLAM
+
+```python
+import carb
+import omni
+from omni.isaac.core import World
+from omni.isaac.core.utils.stage import add_reference_to_stage
+from omni.isaac.core.utils.prims import get_prim_at_path
+from omni.isaac.sensor import Camera, Imu
+from omni.isaac.core.materials import PhysicsMaterial
+from omni.isaac.core.objects import DynamicCuboid
+from omni.isaac.core.utils.viewports import set_camera_view
+from pxr import Gf, UsdGeom, Sdf
+
+class IsaacSLAMSystem:
+    """Integration of SLAM with Isaac Sim environment"""
+
+    def __init__(self, world: World):
+        self.world = world
+        self.slam_pipeline = None
+        self.cameras = []
+        self.imus = []
+        self.slam_initialized = False
+
+    def setup_sensors(self, robot_prim_path: str):
+        """Setup cameras and IMUs for SLAM"""
+
+        # Add stereo cameras for visual SLAM
+        left_camera = self.add_camera(
+            prim_path=f"{robot_prim_path}/left_camera",
+            position=[0.1, -0.05, 0.1],
+            orientation=[1, 0, 0, 0]
+        )
+
+        right_camera = self.add_camera(
+            prim_path=f"{robot_prim_path}/right_camera",
+            position=[0.1, 0.05, 0.1],
+            orientation=[1, 0, 0, 0]
+        )
+
+        self.cameras = [left_camera, right_camera]
+
+        # Add IMU sensor
+        imu_sensor = self.add_imu(
+            prim_path=f"{robot_prim_path}/imu",
+            position=[0, 0, 0.15],
+            orientation=[1, 0, 0, 0]
+        )
+
+        self.imus = [imu_sensor]
+
+    def add_camera(self, prim_path: str, position: list, orientation: list):
+        """Add a camera sensor to the robot"""
+        camera = Camera(
+            prim_path=prim_path,
+            frequency=30,  # 30 Hz
+            resolution=(640, 480),
+            position=position,
+            orientation=orientation
+        )
+
+        # Enable depth and segmentation data
+        camera.add_data_type("depth")
+        camera.add_data_type("rgb")
+        camera.add_data_type("instance_segmentation")
+
+        return camera
+
+    def add_imu(self, prim_path: str, position: list, orientation: list):
+        """Add an IMU sensor to the robot"""
+        imu = Imu(
+            prim_path=prim_path,
+            frequency=200,  # 200 Hz for high-frequency motion data
+            position=position,
+            orientation=orientation
+        )
+
+        return imu
+
+    def initialize_slam_pipeline(self):
+        """Initialize the SLAM pipeline using Isaac tools"""
+
+        # Import Isaac SLAM modules
+        try:
+            from omni.isaac.orbit_assets import SLAMPipeline
+            from omni.isaac.core.utils import nucleus
+        except ImportError:
+            print("Isaac SLAM extensions not available, using custom implementation")
+            self.slam_pipeline = VisualInertialSLAM()
+            self.slam_initialized = True
+            return
+
+        # Initialize SLAM pipeline
+        self.slam_pipeline = SLAMPipeline(
+            camera_resolution=(640, 480),
+            imu_frequency=200,
+            max_features=2000,
+            feature_quality=0.01,
+            backend="cuda"
+        )
+
+        # Configure SLAM parameters
+        self.slam_pipeline.set_parameters({
+            "tracking_threshold": 10,
+            "relocalization_threshold": 50,
+            "loop_closure_enabled": True,
+            "bundle_adjustment_frequency": 10,
+            "map_merging_enabled": True
+        })
+
+        self.slam_initialized = True
+
+    def process_sensor_data(self):
+        """Process sensor data through SLAM pipeline"""
+        if not self.slam_initialized:
+            return None
+
+        # Get camera data
+        camera_data = {}
+        for i, camera in enumerate(self.cameras):
+            rgb_data = camera.get_rgb_data()
+            depth_data = camera.get_depth_data()
+
+            camera_data[f'camera_{i}'] = {
+                'rgb': rgb_data,
+                'depth': depth_data,
+                'timestamp': camera.last_frame_time
+            }
+
+        # Get IMU data
+        imu_data = {}
+        for i, imu in enumerate(self.imus):
+            linear_accel = imu.get_linear_acceleration()
+            angular_vel = imu.get_angular_velocity()
+
+            imu_data[f'imu_{i}'] = {
+                'acceleration': linear_accel,
+                'angular_velocity': angular_vel,
+                'timestamp': imu.last_frame_time
+            }
+
+        # Process through SLAM pipeline
+        slam_result = self.slam_pipeline.process(
+            camera_data=camera_data,
+            imu_data=imu_data
+        )
+
+        return slam_result
+
+    def get_current_map(self):
+        """Get the current map from SLAM system"""
+        if not self.slam_initialized or self.slam_pipeline is None:
+            return None
+
+        return self.slam_pipeline.get_map()
+
+    def get_robot_pose(self):
+        """Get current robot pose from SLAM"""
+        if not self.slam_initialized or self.slam_pipeline is None:
+            return None
+
+        return self.slam_pipeline.get_current_pose()
+
+    def reset_slam(self):
+        """Reset SLAM system"""
+        if self.slam_pipeline:
+            self.slam_pipeline.reset()
+
+        # Clear all stored data
+        self.cameras = []
+        self.imus = []
+        self.slam_initialized = False
+
+class IsaacSLAMOrchestrator:
+    """Orchestrates SLAM operations within Isaac Sim"""
+
+    def __init__(self, world: World):
+        self.world = world
+        self.slam_system = IsaacSLAMSystem(world)
+        self.navigation_planner = None
+        self.localization_accuracy = 0.0
+
+    def setup_robot_slam(self, robot_name: str = "/World/Robot"):
+        """Setup SLAM for a specific robot"""
+
+        # Setup sensors
+        self.slam_system.setup_sensors(robot_name)
+
+        # Initialize SLAM pipeline
+        self.slam_system.initialize_slam_pipeline()
+
+        # Setup navigation planner
+        self.navigation_planner = PathPlanner()
+
+        print(f"SLAM system initialized for robot: {robot_name}")
+
+    def run_slam_loop(self, max_iterations: int = 1000):
+        """Run the main SLAM processing loop"""
+
+        for iteration in range(max_iterations):
+            # Step the world simulation
+            self.world.step(render=True)
+
+            # Process sensor data through SLAM
+            slam_result = self.slam_system.process_sensor_data()
+
+            if slam_result:
+                # Update localization accuracy
+                self.localization_accuracy = slam_result.get('accuracy', 0.0)
+
+                # Update navigation planner with new map
+                current_map = self.slam_system.get_current_map()
+                if current_map:
+                    self.navigation_planner.update_map(current_map)
+
+                # Log SLAM status
+                self.log_slam_status(slam_result, iteration)
+
+            # Check for termination conditions
+            if self.should_terminate():
+                break
+
+    def log_slam_status(self, slam_result: Dict, iteration: int):
+        """Log SLAM system status"""
+        pose = slam_result.get('pose', {})
+        tracking_status = slam_result.get('tracking_status', 'UNKNOWN')
+
+        print(f"Iteration {iteration}: "
+              f"Position: {pose.get('position', [0,0,0])}, "
+              f"Tracking: {tracking_status}, "
+              f"Accuracy: {self.localization_accuracy:.3f}m")
+
+    def should_terminate(self) -> bool:
+        """Check if SLAM loop should terminate"""
+        # Implement termination logic based on accuracy, tracking status, etc.
+        return False
+
+    def get_localization_metrics(self) -> Dict:
+        """Get current localization metrics"""
+        return {
+            'position_accuracy': self.localization_accuracy,
+            'tracking_quality': self.get_tracking_quality(),
+            'map_coverage': self.get_map_coverage(),
+            'feature_density': self.get_feature_density()
+        }
+
+    def get_tracking_quality(self) -> float:
+        """Get current tracking quality metric"""
+        # This would interface with the SLAM system to get tracking quality
+        return 0.9  # Placeholder
+
+    def get_map_coverage(self) -> float:
+        """Get map coverage metric"""
+        # This would calculate map coverage based on explored areas
+        return 0.7  # Placeholder
+
+    def get_feature_density(self) -> float:
+        """Get feature density in current view"""
+        # This would calculate feature density from current camera view
+        return 50.0  # Features per square meter, placeholder
+```
+
+## Omniverse Replicator for Synthetic SLAM Data
+
+### Introduction to Synthetic Data Generation
+
+Omniverse Replicator is NVIDIA's synthetic data generation tool that creates photorealistic training data for AI models. For SLAM systems, synthetic data is crucial for training robust perception algorithms that can handle diverse environments and conditions.
+
+### Generating SLAM Training Data
+
+```python
+from omni.replicator.core import Replicator, random_colours, on_time, sphere_points
+from omni.replicator.core.utils import get_ext_template
+import omni.kit.commands
+from pxr import Gf, UsdGeom, Sdf, UsdShade
+import numpy as np
+import json
+from typing import Dict, List, Tuple
+
+class SLAMDataGenerator:
+    """Generates synthetic data for training SLAM systems"""
+
+    def __init__(self):
+        self.replicator = Replicator()
+        self.scene_config = {}
+        self.annotation_schemas = []
+        self.data_output_dir = "/path/to/slam/dataset"
+
+    def setup_replicator(self):
+        """Setup Omniverse Replicator for SLAM data generation"""
+
+        # Create annotators for SLAM-relevant data
+        self.replicator.add_annotator("bbox", init_params={"semantic": True})
+        self.replicator.add_annotator("instance", init_params={"semantic": True})
+        self.replicator.add_annotator("depth", init_params={"type": "distance"})
+        self.replicator.add_annotator("normal", init_params={})
+        self.replicator.add_annotator("motion_vector", init_params={})
+
+        # Add camera intrinsic annotators
+        self.replicator.add_annotator("camera", init_params={})
+
+    def define_scene_variations(self):
+        """Define scene variations for synthetic SLAM data"""
+
+        # Lighting variations
+        lighting_config = {
+            "light_types": ["dome", "directional", "sphere"],
+            "intensity_range": [0.5, 2.0],
+            "color_temperatures": [3000, 6500, 10000],  # Kelvin
+            "shadow_softness": [0.1, 0.8]
+        }
+
+        # Environment variations
+        environment_config = {
+            "indoor_scenes": [
+                "office", "warehouse", "home", "laboratory", "corridor"
+            ],
+            "outdoor_scenes": [
+                "park", "street", "plaza", "garden", "construction_site"
+            ],
+            "object_densities": [0.1, 0.8],  # Objects per square meter
+            "texture_variations": ["smooth", "rough", "reflective", "matte"]
+        }
+
+        # Camera variations
+        camera_config = {
+            "focal_lengths": [18, 24, 35, 50, 85],  # mm
+            "sensor_sizes": [(36, 24), (23.6, 15.6), (17.3, 13)],
+            "distortion_coefficients": {
+                "k1": [-0.5, 0.5],
+                "k2": [-0.1, 0.1],
+                "p1": [-0.01, 0.01],
+                "p2": [-0.01, 0.01]
+            }
+        }
+
+        # Motion variations
+        motion_config = {
+            "linear_velocities": [0.1, 2.0],  # m/s
+            "angular_velocities": [0.1, 2.0],  # rad/s
+            "acceleration_profiles": ["constant", "sinusoidal", "random_walk"]
+        }
+
+        self.scene_config = {
+            "lighting": lighting_config,
+            "environment": environment_config,
+            "camera": camera_config,
+            "motion": motion_config
+        }
+
+    def generate_training_scenes(self, num_scenes: int = 1000):
+        """Generate diverse training scenes for SLAM"""
+
+        for scene_idx in range(num_scenes):
+            print(f"Generating scene {scene_idx + 1}/{num_scenes}")
+
+            # Create a new scene
+            stage = self.create_scene_with_variations()
+
+            # Annotate the scene
+            annotations = self.annotate_scene(stage)
+
+            # Save the scene and annotations
+            self.save_scene_data(stage, annotations, scene_idx)
+
+            # Clean up for next scene
+            stage.Close()
+
+    def create_scene_with_variations(self):
+        """Create a scene with random variations"""
+        from pxr import UsdStage, SdfLayer, Gf
+
+        # Create new stage
+        stage = UsdStage.CreateNew(f"slam_scene_{np.random.randint(10000)}.usd")
+
+        # Add default prim
+        world_prim = stage.DefinePrim("/World", "Xform")
+
+        # Add ground plane
+        ground = stage.DefinePrim("/World/Ground", "Mesh")
+        # Configure ground properties
+
+        # Add lighting with random variations
+        self.add_random_lighting(stage)
+
+        # Add objects with random placements
+        self.add_random_objects(stage)
+
+        # Add camera with random parameters
+        self.add_random_camera(stage)
+
+        return stage
+
+    def add_random_lighting(self, stage):
+        """Add random lighting to the scene"""
+        import random
+
+        light_type = random.choice(self.scene_config["lighting"]["light_types"])
+
+        if light_type == "dome":
+            # Add dome light
+            dome_light = stage.DefinePrim("/World/DomeLight", "DomeLight")
+            intensity = random.uniform(*self.scene_config["lighting"]["intensity_range"])
+            color_temp = random.choice(self.scene_config["lighting"]["color_temperatures"])
+
+            # Set dome light properties
+            dome_light.CreateAttribute("intensity", Sdf.ValueTypeNames.Float).Set(intensity)
+
+        elif light_type == "directional":
+            # Add directional light
+            dir_light = stage.DefinePrim("/World/DirectionalLight", "DistantLight")
+            # Set directional light properties
+
+        elif light_type == "sphere":
+            # Add sphere light
+            sphere_light = stage.DefinePrim("/World/SphereLight", "SphereLight")
+            # Set sphere light properties
+
+    def add_random_objects(self, stage):
+        """Add random objects to create SLAM features"""
+        import random
+
+        # Define object types that are good for SLAM (distinctive features)
+        slam_objects = [
+            "cubes", "cylinders", "spheres", "pyramids",
+            "textured_planes", "furniture", "obstacles"
+        ]
+
+        num_objects = random.randint(5, 20)
+
+        for i in range(num_objects):
+            obj_type = random.choice(slam_objects[:6])  # Use basic shapes
+
+            obj_prim = stage.DefinePrim(f"/World/Object_{i}", "Xform")
+
+            # Random position
+            x = random.uniform(-5, 5)
+            y = random.uniform(-5, 5)
+            z = random.uniform(0, 2)
+
+            obj_prim.CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(x, y, z))
+
+            # Add distinctive textures/properties for feature detection
+            self.add_distinctive_features(obj_prim)
+
+    def add_distinctive_features(self, prim):
+        """Add features that are good for visual SLAM"""
+        # This would add textures, patterns, or properties that create good visual features
+        pass
+
+    def add_random_camera(self, stage):
+        """Add camera with random parameters for SLAM"""
+        from omni.isaac.core.utils.prims import define_prim
+
+        # Define camera prim
+        camera_prim = stage.DefinePrim("/World/Camera", "Camera")
+
+        # Set random camera parameters based on config
+        focal_length = random.choice(self.scene_config["camera"]["focal_lengths"])
+        sensor_size = random.choice(self.scene_config["camera"]["sensor_sizes"])
+
+        camera_prim.CreateAttribute("focalLength", Sdf.ValueTypeNames.Float).Set(focal_length)
+        camera_prim.CreateAttribute("horizontalAperture", Sdf.ValueTypeNames.Float).Set(sensor_size[0])
+        camera_prim.CreateAttribute("verticalAperture", Sdf.ValueTypeNames.Float).Set(sensor_size[1])
+
+    def annotate_scene(self, stage):
+        """Generate annotations for the scene"""
+        # This would use Replicator annotators to generate ground truth data
+        annotations = {
+            "camera_poses": self.generate_camera_poses(),
+            "feature_points": self.generate_feature_points(),
+            "depth_maps": self.generate_depth_data(),
+            "optical_flow": self.generate_optical_flow(),
+            "imu_data": self.generate_imu_simulation()
+        }
+
+        return annotations
+
+    def generate_camera_poses(self) -> List[Dict]:
+        """Generate camera poses for SLAM trajectory"""
+        poses = []
+
+        # Generate a realistic trajectory (e.g., random walk with smooth turns)
+        for frame in range(100):  # 100 frames of trajectory
+            # Random motion with smooth transitions
+            position = np.array([
+                frame * 0.1 + np.random.normal(0, 0.05),
+                np.sin(frame * 0.1) * 0.5 + np.random.normal(0, 0.05),
+                1.0 + np.random.normal(0, 0.02)  # Fixed height with small variation
+            ])
+
+            # Random orientation (with smooth changes)
+            orientation = self.generate_smooth_orientation(frame)
+
+            poses.append({
+                "frame": frame,
+                "position": position.tolist(),
+                "orientation": orientation.tolist(),
+                "timestamp": frame * 0.033  # Assuming 30 FPS
+            })
+
+        return poses
+
+    def generate_smooth_orientation(self, frame: int) -> np.ndarray:
+        """Generate smooth orientation changes for realistic motion"""
+        # Use quaternion slerp for smooth rotation
+        base_quat = np.array([1, 0, 0, 0])  # Identity
+
+        # Add small random rotations for natural movement
+        angle = np.random.normal(0, 0.1)
+        axis = np.random.normal(0, 1, 3)
+        axis = axis / np.linalg.norm(axis)  # Normalize
+
+        # Convert axis-angle to quaternion
+        s = np.sin(angle / 2)
+        orientation = np.array([
+            np.cos(angle / 2),
+            s * axis[0],
+            s * axis[1],
+            s * axis[2]
+        ])
+
+        return orientation
+
+    def generate_feature_points(self) -> List[Dict]:
+        """Generate 3D feature points for SLAM"""
+        features = []
+
+        # Generate feature points in the scene
+        for i in range(500):  # 500 feature points
+            # Random 3D position in scene bounds
+            pos = np.array([
+                np.random.uniform(-5, 5),
+                np.random.uniform(-5, 5),
+                np.random.uniform(0, 3)
+            ])
+
+            # Feature descriptor (simplified)
+            descriptor = np.random.random(128).astype(np.float32)
+
+            features.append({
+                "id": i,
+                "position": pos.tolist(),
+                "descriptor": descriptor.tolist(),
+                "visibility": []  # Will be filled with frame visibility
+            })
+
+        return features
+
+    def generate_depth_data(self) -> Dict:
+        """Generate synthetic depth data"""
+        return {
+            "format": "distance",
+            "resolution": [640, 480],
+            "data": []  # Would contain depth values
+        }
+
+    def generate_optical_flow(self) -> Dict:
+        """Generate synthetic optical flow data"""
+        return {
+            "format": "2d_vectors",
+            "resolution": [640, 480],
+            "data": []  # Would contain flow vectors
+        }
+
+    def generate_imu_simulation(self) -> List[Dict]:
+        """Generate simulated IMU data for SLAM"""
+        imu_data = []
+
+        for frame in range(100):
+            # Generate realistic IMU readings
+            # Accelerometer (with gravity and motion)
+            gravity = np.array([0, 0, -9.81])
+            motion_acc = np.random.normal(0, 0.1, 3)  # Small motion accelerations
+            acc = gravity + motion_acc + np.random.normal(0, 0.01, 3)  # Add noise
+
+            # Gyroscope (angular velocities)
+            ang_vel = np.random.normal(0, 0.1, 3)  # Small angular velocities with noise
+
+            imu_data.append({
+                "frame": frame,
+                "acceleration": acc.tolist(),
+                "angular_velocity": ang_vel.tolist(),
+                "timestamp": frame * 0.005  # 200 Hz IMU
+            })
+
+        return imu_data
+
+    def save_scene_data(self, stage, annotations: Dict, scene_idx: int):
+        """Save scene data and annotations"""
+        import os
+
+        # Create output directory if it doesn't exist
+        os.makedirs(self.data_output_dir, exist_ok=True)
+
+        # Save USD stage
+        stage_path = os.path.join(self.data_output_dir, f"scene_{scene_idx:04d}.usd")
+        stage.Export(stage_path)
+
+        # Save annotations
+        annotation_path = os.path.join(self.data_output_dir, f"scene_{scene_idx:04d}_annotations.json")
+        with open(annotation_path, 'w') as f:
+            json.dump(annotations, f, indent=2)
+
+class SLAMDatasetBuilder:
+    """Builds complete SLAM training datasets using synthetic data"""
+
+    def __init__(self):
+        self.generator = SLAMDataGenerator()
+        self.dataset_stats = {}
+        self.validation_metrics = {}
+
+    def build_dataset(self, config: Dict):
+        """Build a complete SLAM dataset"""
+
+        print("Setting up Replicator...")
+        self.generator.setup_replicator()
+
+        print("Defining scene variations...")
+        self.generator.define_scene_variations()
+
+        print(f"Generating {config['num_scenes']} training scenes...")
+        self.generator.generate_training_scenes(config['num_scenes'])
+
+        print("Calculating dataset statistics...")
+        self.dataset_stats = self.calculate_dataset_statistics()
+
+        print("Validating dataset quality...")
+        self.validation_metrics = self.validate_dataset_quality()
+
+        print("Dataset building complete!")
+        return self.get_build_report()
+
+    def calculate_dataset_statistics(self) -> Dict:
+        """Calculate statistics about the generated dataset"""
+        return {
+            "total_scenes": 1000,
+            "scene_types": {
+                "indoor": 600,
+                "outdoor": 400
+            },
+            "feature_density": 45.2,  # Features per frame
+            "trajectory_complexity": 0.7,  # Scale 0-1
+            "lighting_variations": 12,  # Number of different lighting conditions
+            "object_variations": 8  # Number of different object types
+        }
+
+    def validate_dataset_quality(self) -> Dict:
+        """Validate the quality of generated dataset"""
+        return {
+            "feature_visibility": 0.85,  # Percentage of features visible
+            "motion_diversity": 0.92,   # How diverse the motions are
+            "annotation_accuracy": 0.99, # Ground truth accuracy
+            "realism_score": 0.88,      # How realistic the data looks
+            "training_readiness": 0.91  # Overall readiness for training
+        }
+
+    def get_build_report(self) -> Dict:
+        """Get complete build report"""
+        return {
+            "dataset_stats": self.dataset_stats,
+            "validation_metrics": self.validation_metrics,
+            "output_path": self.generator.data_output_dir,
+            "generation_time": "2.5 hours",  # Placeholder
+            "file_size": "15 GB"  # Placeholder
+        }
+
+    def generate_evaluation_scenes(self, num_scenes: int = 100):
+        """Generate separate evaluation scenes"""
+        print(f"Generating {num_scenes} evaluation scenes...")
+
+        # Use different parameters for evaluation to avoid overfitting
+        eval_config = self.generator.scene_config.copy()
+        # Modify config for evaluation scenes
+
+        # Generate evaluation scenes
+        for scene_idx in range(num_scenes):
+            # Create evaluation scene
+            stage = self.generator.create_scene_with_variations()
+
+            # Special evaluation annotations
+            eval_annotations = self.generate_evaluation_annotations(stage)
+
+            # Save evaluation data
+            self.generator.save_scene_data(
+                stage,
+                eval_annotations,
+                f"eval_{scene_idx:04d}"
+            )
+
+            stage.Close()
+
+    def generate_evaluation_annotations(self, stage) -> Dict:
+        """Generate evaluation-specific annotations"""
+        # This would generate more detailed ground truth for evaluation
+        return {
+            "ground_truth_poses": self.generate_ground_truth_poses(),
+            "metric_annotations": self.generate_metric_annotations(),
+            "benchmark_targets": self.generate_benchmark_targets()
+        }
+
+    def generate_ground_truth_poses(self) -> List[Dict]:
+        """Generate precise ground truth poses for evaluation"""
+        # More precise trajectory generation for evaluation
+        return []
+
+    def generate_metric_annotations(self) -> Dict:
+        """Generate annotations for SLAM metrics calculation"""
+        return {}
+
+    def generate_benchmark_targets(self) -> List[str]:
+        """Generate list of benchmark targets for evaluation"""
+        return [
+            "absolute_trajectory_error",
+            "relative_pose_error",
+            "map_accuracy",
+            "tracking_stability"
+        ]
+```
+
+## Hardware Acceleration with NVIDIA GPUs
+
+### GPU-Accelerated Feature Detection
+
+Modern SLAM systems leverage GPU acceleration to achieve real-time performance. NVIDIA GPUs provide specialized hardware for computer vision tasks including feature detection, matching, and optimization.
+
+```python
+import cupy as cp
+import numpy as np
+from numba import cuda
+import pycuda.driver as cuda_driver
+import pycuda.autoinit
+from pycuda.compiler import SourceModule
+
+class GPUFeatureDetector:
+    """GPU-accelerated feature detection for SLAM"""
+
+    def __init__(self, max_features: int = 2000):
+        self.max_features = max_features
+
+        # CUDA kernels for feature detection
+        self.corner_kernel = self.compile_corner_kernel()
+        self.descriptor_kernel = self.compile_descriptor_kernel()
+
+        # GPU memory management
+        self.gpu_image_buffer = None
+        self.gpu_features_buffer = None
+
+    def compile_corner_kernel(self):
+        """Compile CUDA kernel for corner detection"""
+        corner_cuda_code = """
+        __global__ void harris_corner_kernel(
+            float* image,
+            float* corners,
+            int width,
+            int height,
+            float threshold
+        ) {
+            int x = blockIdx.x * blockDim.x + threadIdx.x;
+            int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+            if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) return;
+
+            int idx = y * width + x;
+
+            // Compute image gradients
+            float dx = image[y * width + (x + 1)] - image[y * width + (x - 1)];
+            float dy = image[(y + 1) * width + x] - image[(y - 1) * width + x];
+
+            // Compute second moment matrix elements
+            float Ixx = dx * dx;
+            float Iyy = dy * dy;
+            float Ixy = dx * dy;
+
+            // Harris corner response
+            float det = Ixx * Iyy - Ixy * Ixy;
+            float trace = Ixx + Iyy;
+            float response = det - 0.04f * trace * trace;
+
+            if (response > threshold) {
+                corners[idx] = response;
+            } else {
+                corners[idx] = 0.0f;
+            }
+        }
+        """
+
+        mod = SourceModule(corner_cuda_code)
+        return mod.get_function("harris_corner_kernel")
+
+    def compile_descriptor_kernel(self):
+        """Compile CUDA kernel for descriptor computation"""
+        desc_cuda_code = """
+        __global__ void brief_descriptor_kernel(
+            float* image,
+            int* keypoints,
+            float* descriptors,
+            int num_keypoints,
+            int width,
+            int height
+        ) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+            if (idx >= num_keypoints) return;
+
+            int x = keypoints[idx * 2];
+            int y = keypoints[idx * 2 + 1];
+
+            // Compute BRIEF descriptor (simplified)
+            float desc[32]; // 256-bit descriptor
+            for (int i = 0; i < 32; i++) {
+                desc[i] = 0.0f;
+            }
+
+            // Sample pairs of pixels and compare intensities
+            for (int i = 0; i < 256; i++) {
+                int dx1 = (i * 7) % 15 - 7; // Random offset
+                int dy1 = (i * 11) % 15 - 7;
+                int dx2 = (i * 13) % 15 - 7;
+                int dy2 = (i * 17) % 15 - 7;
+
+                float val1 = image[(y + dy1) * width + (x + dx1)];
+                float val2 = image[(y + dy2) * width + (x + dx2)];
+
+                if (val1 > val2) {
+                    int desc_idx = i / 32;
+                    int bit_idx = i % 32;
+                    desc[desc_idx] |= (1 << bit_idx);
+                }
+            }
+
+            // Store descriptor
+            for (int i = 0; i < 32; i++) {
+                descriptors[idx * 32 + i] = desc[i];
+            }
+        }
+        """
+
+        mod = SourceModule(desc_cuda_code)
+        return mod.get_function("brief_descriptor_kernel")
+
+    def detect_features_gpu(self, image: np.ndarray) -> Dict:
+        """Detect features using GPU acceleration"""
+
+        # Transfer image to GPU
+        h, w = image.shape[:2]
+        gpu_image = cp.asarray(image.astype(np.float32))
+
+        # Detect corners
+        corners = cp.zeros_like(gpu_image)
+        block_size = (16, 16)
+        grid_size = ((w + block_size[0] - 1) // block_size[0],
+                     (h + block_size[1] - 1) // block_size[1])
+
+        self.corner_kernel(
+            gpu_image,
+            corners,
+            np.int32(w),
+            np.int32(h),
+            np.float32(0.0001),
+            block=block_size,
+            grid=grid_size
+        )
+
+        # Extract corner points
+        corner_points = cp.argwhere(corners > 0.0001)
+        corner_responses = corners[corner_points[:, 0], corner_points[:, 1]]
+
+        # Sort by response strength and keep top features
+        if len(corner_points) > self.max_features:
+            top_indices = cp.argsort(corner_responses)[-self.max_features:]
+            corner_points = corner_points[top_indices]
+
+        return {
+            'keypoints': corner_points.get(),
+            'responses': corner_responses.get(),
+            'count': len(corner_points)
+        }
+
+    def compute_descriptors_gpu(self, image: np.ndarray, keypoints: np.ndarray) -> np.ndarray:
+        """Compute descriptors for keypoints using GPU"""
+
+        if len(keypoints) == 0:
+            return np.array([])
+
+        # Transfer data to GPU
+        gpu_image = cp.asarray(image.astype(np.float32))
+        gpu_keypoints = cp.asarray(keypoints.astype(np.int32))
+        gpu_descriptors = cp.zeros((len(keypoints), 32), dtype=cp.float32)
+
+        # Compute descriptors
+        block_size = (256,)
+        grid_size = ((len(keypoints) + block_size[0] - 1) // block_size[0],)
+
+        self.descriptor_kernel(
+            gpu_image,
+            gpu_keypoints,
+            gpu_descriptors,
+            np.int32(len(keypoints)),
+            np.int32(image.shape[1]),
+            np.int32(image.shape[0]),
+            block=block_size,
+            grid=grid_size
+        )
+
+        return gpu_descriptors.get()
+
+class GPUSLAMBackend:
+    """GPU-accelerated backend for SLAM optimization"""
+
+    def __init__(self):
+        self.pose_graph_optimizer = GPUOptimizer()
+        self.bundle_adjuster = GPUBundleAdjuster()
+        self.triangulator = GPUTriangulator()
+
+    def optimize_pose_graph_gpu(self, poses: np.ndarray, constraints: List[Dict]) -> np.ndarray:
+        """Optimize pose graph using GPU acceleration"""
+        return self.pose_graph_optimizer.optimize(poses, constraints)
+
+    def run_bundle_adjustment_gpu(
+        self,
+        camera_poses: np.ndarray,
+        points_3d: np.ndarray,
+        observations: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Run bundle adjustment using GPU"""
+        return self.bundle_adjuster.optimize(camera_poses, points_3d, observations)
+
+    def triangulate_points_gpu(
+        self,
+        points_2d: List[np.ndarray],
+        camera_poses: List[np.ndarray]
+    ) -> np.ndarray:
+        """Triangulate 3D points from 2D observations"""
+        return self.triangulator.triangulate(points_2d, camera_poses)
+
+class GPUOptimizer:
+    """GPU-accelerated optimization for SLAM"""
+
+    def __init__(self):
+        # Initialize CUDA contexts and memory pools
+        self.max_iterations = 100
+        self.convergence_threshold = 1e-6
+
+    def optimize(self, poses: np.ndarray, constraints: List[Dict]) -> np.ndarray:
+        """Optimize poses using GPU"""
+
+        # Transfer to GPU
+        gpu_poses = cp.asarray(poses.astype(cp.float64))
+        gpu_constraints = self.prepare_constraints_gpu(constraints)
+
+        # Run optimization iterations
+        for iteration in range(self.max_iterations):
+            prev_poses = gpu_poses.copy()
+
+            # Compute residuals and Jacobians on GPU
+            residuals, jacobians = self.compute_system_gpu(gpu_poses, gpu_constraints)
+
+            # Solve normal equations using Cholesky decomposition on GPU
+            delta = self.solve_normal_equations_gpu(jacobians, residuals)
+
+            # Update poses
+            gpu_poses = gpu_poses - delta
+
+            # Check for convergence
+            if cp.linalg.norm(delta) < self.convergence_threshold:
+                break
+
+        return gpu_poses.get()
+
+    def prepare_constraints_gpu(self, constraints: List[Dict]):
+        """Prepare constraints for GPU processing"""
+        # Convert constraints to GPU-friendly format
+        return cp.array([c['relative_pose'] for c in constraints])
+
+    def compute_system_gpu(self, poses, constraints):
+        """Compute residual and Jacobian system on GPU"""
+        # Implementation would compute residuals and Jacobians using CUDA
+        residuals = cp.zeros(100)  # Placeholder
+        jacobians = cp.zeros((100, 6))  # Placeholder
+        return residuals, jacobians
+
+    def solve_normal_equations_gpu(self, jacobians, residuals):
+        """Solve normal equations using GPU"""
+        # J^T * J * delta = -J^T * r
+        JTJ = jacobians.T @ jacobians
+        JTr = -(jacobians.T @ residuals)
+
+        # Solve using Cholesky decomposition
+        L = cp.linalg.cholesky(JTJ)
+        y = cp.linalg.solve_triangular(L, JTr, lower=True)
+        delta = cp.linalg.solve_triangular(L.T, y, lower=False)
+
+        return delta
+
+class GPUBundleAdjuster:
+    """GPU-accelerated bundle adjustment"""
+
+    def __init__(self):
+        self.max_iterations = 50
+        self.convergence_threshold = 1e-6
+
+    def optimize(
+        self,
+        camera_poses: np.ndarray,
+        points_3d: np.ndarray,
+        observations: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Run bundle adjustment on GPU"""
+
+        # Transfer to GPU
+        gpu_poses = cp.asarray(camera_poses.astype(cp.float64))
+        gpu_points = cp.asarray(points_3d.astype(cp.float64))
+        gpu_obs = cp.asarray(observations.astype(cp.float64))
+
+        # Optimization loop
+        for iteration in range(self.max_iterations):
+            prev_poses = gpu_poses.copy()
+            prev_points = gpu_points.copy()
+
+            # Compute residuals and Jacobians
+            residuals, pose_jacs, point_jacs = self.compute_ba_system_gpu(
+                gpu_poses, gpu_points, gpu_obs
+            )
+
+            # Solve using Levenberg-Marquardt on GPU
+            pose_updates, point_updates = self.solve_ba_gpu(
+                pose_jacs, point_jacs, residuals
+            )
+
+            # Apply updates
+            gpu_poses = gpu_poses + pose_updates
+            gpu_points = gpu_points + point_updates
+
+            # Check convergence
+            pose_norm = cp.linalg.norm(pose_updates)
+            point_norm = cp.linalg.norm(point_updates)
+
+            if pose_norm < self.convergence_threshold and point_norm < self.convergence_threshold:
+                break
+
+        return gpu_poses.get(), gpu_points.get()
+
+    def compute_ba_system_gpu(self, poses, points, observations):
+        """Compute bundle adjustment system on GPU"""
+        # This would implement projection and Jacobian computation on GPU
+        residuals = cp.zeros(1000)  # Placeholder
+        pose_jacs = cp.zeros((1000, 6))  # Placeholder
+        point_jacs = cp.zeros((1000, 3))  # Placeholder
+        return residuals, pose_jacs, point_jacs
+
+    def solve_ba_gpu(self, pose_jacs, point_jacs, residuals):
+        """Solve bundle adjustment system on GPU"""
+        # Implementation would use Schur complement or other BA-specific methods
+        pose_updates = cp.zeros(pose_jacs.shape[1])
+        point_updates = cp.zeros(point_jacs.shape[1])
+        return pose_updates, point_updates
+
+class GPUTriangulator:
+    """GPU-accelerated 3D point triangulation"""
+
+    def __init__(self):
+        self.triangulation_kernel = self.compile_triangulation_kernel()
+
+    def compile_triangulation_kernel(self):
+        """Compile CUDA kernel for triangulation"""
+        triangulation_cuda_code = """
+        __global__ void triangulate_kernel(
+            float* points_2d_1,
+            float* points_2d_2,
+            float* pose_1,
+            float* pose_2,
+            float* points_3d,
+            int num_points
+        ) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+            if (idx >= num_points) return;
+
+            // Extract 2D points
+            float x1 = points_2d_1[idx * 2];
+            float y1 = points_2d_1[idx * 2 + 1];
+            float x2 = points_2d_2[idx * 2];
+            float y2 = points_2d_2[idx * 2 + 1];
+
+            // Extract camera matrices (simplified)
+            // In practice, this would use full 3x4 projection matrices
+            float3 C1 = make_float3(pose_1[3], pose_1[7], pose_1[11]); // Camera center 1
+            float3 C2 = make_float3(pose_2[3], pose_2[7], pose_2[11]); // Camera center 2
+
+            // Triangulation using SVD or other method
+            // Simplified linear triangulation
+            float3 ray1 = normalize(make_float3(x1, y1, 1.0f));
+            float3 ray2 = normalize(make_float3(x2, y2, 1.0f));
+
+            // Solve for 3D point using linear least squares
+            // This is a simplified version - full implementation would be more complex
+            float3 point_3d;
+            point_3d.x = (C1.x + C2.x) / 2.0f + (ray1.x + ray2.x) * 10.0f;
+            point_3d.y = (C1.y + C2.y) / 2.0f + (ray1.y + ray2.y) * 10.0f;
+            point_3d.z = (C1.z + C2.z) / 2.0f + (ray1.z + ray2.z) * 10.0f;
+
+            // Store result
+            points_3d[idx * 3] = point_3d.x;
+            points_3d[idx * 3 + 1] = point_3d.y;
+            points_3d[idx * 3 + 2] = point_3d.z;
+        }
+        """
+
+        mod = SourceModule(triangulation_cuda_code)
+        return mod.get_function("triangulate_kernel")
+
+    def triangulate(
+        self,
+        points_2d: List[np.ndarray],
+        camera_poses: List[np.ndarray]
+    ) -> np.ndarray:
+        """Triangulate 3D points from multiple views using GPU"""
+
+        if len(points_2d) < 2:
+            return np.array([])
+
+        # Use first two views for triangulation (in practice, use all available views)
+        points_1 = points_2d[0]
+        points_2 = points_2d[1]
+        pose_1 = camera_poses[0]
+        pose_2 = camera_poses[1]
+
+        if len(points_1) != len(points_2):
+            # Need to match points between views first
+            matches = self.match_features(points_1, points_2)
+            points_1_matched = points_1[matches[:, 0]]
+            points_2_matched = points_2[matches[:, 1]]
+        else:
+            points_1_matched = points_1
+            points_2_matched = points_2
+
+        # Transfer to GPU
+        gpu_points_1 = cp.asarray(points_1_matched.astype(cp.float32))
+        gpu_points_2 = cp.asarray(points_2_matched.astype(cp.float32))
+        gpu_pose_1 = cp.asarray(pose_1.astype(cp.float32))
+        gpu_pose_2 = cp.asarray(pose_2.astype(cp.float32))
+        gpu_points_3d = cp.zeros((len(points_1_matched), 3), dtype=cp.float32)
+
+        # Run triangulation kernel
+        block_size = (256,)
+        grid_size = ((len(points_1_matched) + block_size[0] - 1) // block_size[0],)
+
+        self.triangulation_kernel(
+            gpu_points_1,
+            gpu_points_2,
+            gpu_pose_1,
+            gpu_pose_2,
+            gpu_points_3d,
+            np.int32(len(points_1_matched)),
+            block=block_size,
+            grid=grid_size
+        )
+
+        return gpu_points_3d.get()
+
+    def match_features(self, points_1: np.ndarray, points_2: np.ndarray) -> np.ndarray:
+        """Simple feature matching (in practice, use descriptors)"""
+        # This would implement proper feature matching using descriptors
+        # For now, return identity mapping
+        n = min(len(points_1), len(points_2))
+        return np.column_stack([np.arange(n), np.arange(n)])
+```
+
+### Tensor Core Optimization for Deep Learning SLAM
+
+NVIDIA's Tensor Cores provide specialized acceleration for deep learning workloads, which can be leveraged for neural SLAM systems that combine traditional geometric methods with deep learning.
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.cpp_extension import load
+import time
+
+class NeuralSLAMModule(nn.Module):
+    """Neural SLAM module using Tensor Core acceleration"""
+
+    def __init__(self, input_channels: int = 3, feature_dim: int = 256):
+        super().__init__()
+
+        # Feature extraction backbone
+        self.feature_extractor = nn.Sequential(
+            # First conv block with Tensor Core-friendly dimensions
+            nn.Conv2d(input_channels, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+
+            # Tensor Core optimized layers (multiples of 8/16/32/64)
+            nn.Conv2d(64, 128, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(128, 256, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+
+            # Bottleneck for dimensionality reduction
+            nn.Conv2d(256, feature_dim, kernel_size=1, bias=False),
+            nn.BatchNorm2d(feature_dim),
+            nn.ReLU(inplace=True)
+        )
+
+        # Pose estimation head
+        self.pose_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(feature_dim, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(512, 6)  # 6-DOF pose (3 translation, 3 rotation)
+        )
+
+        # Depth estimation head
+        self.depth_head = nn.Sequential(
+            nn.Conv2d(feature_dim, 128, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 1, kernel_size=1),  # Single channel depth map
+            nn.Sigmoid()  # Normalize to [0,1] range
+        )
+
+        # Initialize weights for Tensor Core efficiency
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        """Initialize weights for optimal Tensor Core performance"""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                # Use Kaiming initialization for ReLU networks
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Forward pass through neural SLAM module"""
+
+        # Extract features
+        features = self.feature_extractor(x)
+
+        # Estimate pose
+        pose = self.pose_head(features)
+
+        # Estimate depth
+        depth = self.depth_head(features)
+
+        # Extract keypoint features (for traditional SLAM integration)
+        keypoint_features = self.extract_keypoints(features)
+
+        return {
+            'pose': pose,
+            'depth': depth,
+            'features': features,
+            'keypoints': keypoint_features
+        }
+
+    def extract_keypoints(self, feature_map: torch.Tensor) -> torch.Tensor:
+        """Extract keypoints from feature map"""
+        # Apply 3x3 max pooling to find local maxima
+        pooled = F.max_pool2d(feature_map, kernel_size=3, stride=1, padding=1)
+        is_max = (feature_map == pooled).float()
+
+        # Apply threshold to get sparse keypoints
+        keypoints = is_max * feature_map
+        return keypoints
+
+class TensorCoreSLAM:
+    """SLAM system optimized for Tensor Core acceleration"""
+
+    def __init__(self, device: str = 'cuda'):
+        self.device = torch.device(device)
+
+        # Neural SLAM module
+        self.neural_slam = NeuralSLAMModule().to(self.device)
+
+        # Traditional geometric SLAM for comparison/hybrid approach
+        self.geometric_slam = VisualInertialSLAM()
+
+        # Optimization parameters
+        self.optimizer = torch.optim.AdamW(
+            self.neural_slam.parameters(),
+            lr=1e-4,
+            weight_decay=1e-4
+        )
+
+        # Mixed precision training for Tensor Core efficiency
+        self.scaler = torch.cuda.amp.GradScaler()
+
+    def train_step(
+        self,
+        images: torch.Tensor,
+        ground_truth_poses: torch.Tensor,
+        ground_truth_depth: torch.Tensor
+    ) -> Dict[str, float]:
+        """Single training step with mixed precision"""
+
+        self.neural_slam.train()
+
+        # Move data to device
+        images = images.to(self.device)
+        gt_poses = ground_truth_poses.to(self.device)
+        gt_depth = ground_truth_depth.to(self.device)
+
+        # Forward pass with mixed precision
+        with torch.cuda.amp.autocast():
+            outputs = self.neural_slam(images)
+
+            # Compute pose loss
+            pose_loss = F.mse_loss(outputs['pose'], gt_poses)
+
+            # Compute depth loss
+            depth_loss = F.l1_loss(outputs['depth'], gt_depth)
+
+            # Total loss
+            total_loss = pose_loss + 0.5 * depth_loss
+
+        # Backward pass with gradient scaling
+        self.optimizer.zero_grad()
+        self.scaler.scale(total_loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+
+        return {
+            'pose_loss': pose_loss.item(),
+            'depth_loss': depth_loss.item(),
+            'total_loss': total_loss.item()
+        }
+
+    def inference(self, image: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Run inference with optimized Tensor Core operations"""
+
+        self.neural_slam.eval()
+
+        with torch.no_grad():
+            # Use mixed precision for inference as well
+            with torch.cuda.amp.autocast():
+                outputs = self.neural_slam(image.to(self.device))
+
+        # Move results back to CPU for further processing
+        cpu_outputs = {}
+        for key, value in outputs.items():
+            cpu_outputs[key] = value.cpu()
+
+        return cpu_outputs
+
+    def hybrid_slam(
+        self,
+        image: torch.Tensor,
+        imu_data: Dict,
+        geometric_features: List[FeaturePoint]
+    ) -> SLAMState:
+        """Combine neural and geometric SLAM for robust performance"""
+
+        # Get neural estimates
+        neural_outputs = self.inference(image)
+        neural_pose = neural_outputs['pose']
+        neural_depth = neural_outputs['depth']
+
+        # Get geometric estimates from traditional SLAM
+        geometric_pose = self.geometric_slam.estimate_pose(geometric_features, imu_data)
+
+        # Fuse estimates based on confidence
+        fused_pose = self.fuse_neural_geometric(
+            neural_pose, geometric_pose, confidence_threshold=0.7
+        )
+
+        return self.update_slam_state(fused_pose)
+
+    def fuse_neural_geometric(
+        self,
+        neural_pose: torch.Tensor,
+        geometric_pose: Dict,
+        confidence_threshold: float = 0.7
+    ) -> Dict:
+        """Fuse neural and geometric pose estimates"""
+
+        # Convert neural pose to geometric format
+        neural_translation = neural_pose[:3].cpu().numpy()
+        neural_rotation = self.quaternion_from_euler(neural_pose[3:].cpu().numpy())
+
+        # Compute confidence scores
+        neural_confidence = self.compute_neural_confidence(neural_pose)
+        geometric_confidence = self.compute_geometric_confidence(geometric_pose)
+
+        # Weighted fusion based on confidence
+        if neural_confidence > confidence_threshold:
+            weight = 0.8  # Trust neural more when confident
+        elif geometric_confidence > confidence_threshold:
+            weight = 0.2  # Trust geometric more when features are good
+        else:
+            weight = 0.5  # Equal weighting when both uncertain
+
+        # Interpolate poses
+        fused_translation = (
+            weight * neural_translation +
+            (1 - weight) * geometric_pose['t']
+        )
+
+        fused_rotation = self.slerp(
+            neural_rotation,
+            geometric_pose['R'],
+            weight
+        )
+
+        return {
+            'R': fused_rotation,
+            't': fused_translation,
+            'confidence': max(neural_confidence, geometric_confidence)
+        }
+
+    def compute_neural_confidence(self, neural_pose: torch.Tensor) -> float:
+        """Compute confidence score for neural pose estimate"""
+        # Use variance of pose predictions or other uncertainty measures
+        # For now, return a simple heuristic
+        return float(torch.sigmoid(torch.norm(neural_pose) * 0.1))
+
+    def compute_geometric_confidence(self, geometric_pose: Dict) -> float:
+        """Compute confidence score for geometric pose estimate"""
+        # Based on number of tracked features, reprojection error, etc.
+        return geometric_pose.get('success', False) * 0.9 or 0.1
+
+    def quaternion_from_euler(self, euler_angles: np.ndarray) -> np.ndarray:
+        """Convert Euler angles to quaternion"""
+        # Simplified conversion - in practice, use proper Euler to quaternion
+        roll, pitch, yaw = euler_angles
+
+        cy = np.cos(yaw * 0.5)
+        sy = np.sin(yaw * 0.5)
+        cp = np.cos(pitch * 0.5)
+        sp = np.sin(pitch * 0.5)
+        cr = np.cos(roll * 0.5)
+        sr = np.sin(roll * 0.5)
+
+        w = cr * cp * cy + sr * sp * sy
+        x = sr * cp * cy - cr * sp * sy
+        y = cr * sp * cy + sr * cp * sy
+        z = cr * cp * sy - sr * sp * cy
+
+        return np.array([w, x, y, z])
+
+    def benchmark_performance(self, num_iterations: int = 100) -> Dict[str, float]:
+        """Benchmark Tensor Core SLAM performance"""
+
+        # Create dummy input data
+        dummy_image = torch.randn(1, 3, 480, 640, device=self.device)
+        dummy_poses = torch.randn(1, 6, device=self.device)
+        dummy_depth = torch.randn(1, 1, 480, 640, device=self.device)
+
+        # Warmup
+        for _ in range(10):
+            _ = self.inference(dummy_image)
+
+        # Benchmark inference
+        start_time = time.time()
+        for _ in range(num_iterations):
+            _ = self.inference(dummy_image)
+        inference_time = (time.time() - start_time) / num_iterations
+
+        # Benchmark training
+        start_time = time.time()
+        for _ in range(num_iterations):
+            _ = self.train_step(dummy_image, dummy_poses, dummy_depth)
+        training_time = (time.time() - start_time) / num_iterations
+
+        return {
+            'inference_fps': 1.0 / inference_time,
+            'inference_time_ms': inference_time * 1000,
+            'training_time_ms': training_time * 1000,
+            'tensor_core_utilization': self.get_tensor_core_utilization()
+        }
+
+    def get_tensor_core_utilization(self) -> float:
+        """Get Tensor Core utilization (requires proper monitoring)"""
+        # This would interface with NVIDIA's profiling tools
+        # For now, return a placeholder
+        return 0.85  # 85% utilization estimate
+```
+
+## Integration with Humanoid Robot Systems
+
+### SLAM-Enabled Navigation for Humanoid Robots
+
+Integrating SLAM with humanoid robot navigation requires special consideration for the robot's bipedal nature, height variations, and interaction with humans in shared spaces.
+
+```python
+class HumanoidSLAMNavigator:
+    """SLAM-enabled navigation system for humanoid robots"""
+
+    def __init__(self, slam_system: IsaacSLAMSystem):
+        self.slam = slam_system
+        self.path_planner = HumanoidPathPlanner()
+        self.trajectory_executor = HumanoidTrajectoryExecutor()
+        self.safety_monitor = HumanoidSafetyMonitor()
+
+        # Human-aware navigation components
+        self.human_detector = HumanDetector()
+        self.social_navigation = SocialNavigationPlanner()
+
+        self.current_map = None
+        self.robot_pose = None
+
+    def update_navigation_system(self):
+        """Update navigation system with latest SLAM data"""
+
+        # Get current map from SLAM
+        self.current_map = self.slam.get_current_map()
+
+        # Get robot pose from SLAM
+        self.robot_pose = self.slam.get_robot_pose()
+
+        if self.current_map and self.robot_pose:
+            # Update path planner with new map
+            self.path_planner.update_map(self.current_map)
+
+            # Update safety monitor with current pose
+            self.safety_monitor.update_pose(self.robot_pose)
+
+    def plan_navigation_path(
+        self,
+        goal_position: np.ndarray,
+        avoid_humans: bool = True
+    ) -> List[np.ndarray]:
+        """Plan navigation path considering SLAM map and humans"""
+
+        if not self.current_map or not self.robot_pose:
+            raise RuntimeError("SLAM system not ready")
+
+        # Detect humans in environment
+        humans = self.human_detector.detect_humans()
+
+        # Plan path with human-aware considerations
+        if avoid_humans and humans:
+            path = self.social_navigation.plan_path(
+                start=self.robot_pose['position'],
+                goal=goal_position,
+                humans=humans,
+                map=self.current_map
+            )
+        else:
+            path = self.path_planner.plan_path(
+                start=self.robot_pose['position'],
+                goal=goal_position,
+                map=self.current_map
+            )
+
+        return path
+
+    def execute_navigation(
+        self,
+        path: List[np.ndarray],
+        speed_profile: str = "normal"
+    ) -> bool:
+        """Execute navigation path while maintaining SLAM tracking"""
+
+        success = True
+
+        for waypoint in path:
+            # Check if SLAM tracking is still good
+            if not self.slam_tracking_valid():
+                print("SLAM tracking lost, stopping navigation")
+                success = False
+                break
+
+            # Execute trajectory to waypoint
+            trajectory_success = self.trajectory_executor.execute_to_waypoint(
+                waypoint,
+                speed_profile
+            )
+
+            if not trajectory_success:
+                print(f"Failed to reach waypoint {waypoint}")
+                success = False
+                break
+
+            # Update safety status
+            if not self.safety_monitor.check_safety():
+                print("Safety violation detected, stopping")
+                success = False
+                break
+
+        return success
+
+    def slam_tracking_valid(self) -> bool:
+        """Check if SLAM tracking is still valid"""
+        localization_metrics = self.slam.get_localization_metrics()
+
+        # Check position accuracy
+        pos_accuracy = localization_metrics.get('position_accuracy', float('inf'))
+        if pos_accuracy > 0.5:  # 50cm threshold
+            return False
+
+        # Check tracking quality
+        tracking_quality = localization_metrics.get('tracking_quality', 0.0)
+        if tracking_quality < 0.5:  # 50% threshold
+            return False
+
+        return True
+
+    def handle_relocalization(self):
+        """Handle SLAM relocalization when tracking is lost"""
+
+        print("Attempting SLAM relocalization...")
+
+        # Stop robot motion
+        self.trajectory_executor.stop_motion()
+
+        # Try to relocalize using global map
+        success = self.slam.relocalize()
+
+        if success:
+            print("Relocalization successful")
+            return True
+        else:
+            print("Relocalization failed, requesting human assistance")
+            return False
+
+class HumanoidPathPlanner:
+    """Path planner optimized for humanoid robots"""
+
+    def __init__(self):
+        self.map_resolution = 0.1  # 10cm resolution
+        self.robot_radius = 0.3    # 30cm radius
+        self.max_step_height = 0.1 # 10cm max step
+        self.max_slope = 15.0      # 15 degree max slope
+
+    def plan_path(
+        self,
+        start: np.ndarray,
+        goal: np.ndarray,
+        map: Dict
+    ) -> List[np.ndarray]:
+        """Plan path for humanoid robot considering its constraints"""
+
+        # Convert to 2D for path planning (ignore Z temporarily)
+        start_2d = start[:2]
+        goal_2d = goal[:2]
+
+        # Use A* with humanoid-specific cost function
+        path_2d = self.a_star_humonoid(
+            start_2d, goal_2d, map, self.robot_radius
+        )
+
+        # Lift path to 3D considering terrain
+        path_3d = self.lift_path_to_3d(path_2d, map)
+
+        return path_3d
+
+    def a_star_humonoid(
+        self,
+        start: np.ndarray,
+        goal: np.ndarray,
+        map: Dict,
+        robot_radius: float
+    ) -> List[np.ndarray]:
+        """A* path planning with humanoid constraints"""
+
+        import heapq
+
+        # Convert start and goal to grid coordinates
+        start_grid = self.world_to_grid(start, map)
+        goal_grid = self.world_to_grid(goal, map)
+
+        # Priority queue: (cost, position)
+        open_set = [(0, start_grid)]
+        came_from = {}
+        g_score = {tuple(start_grid): 0}
+        f_score = {tuple(start_grid): self.heuristic(start_grid, goal_grid)}
+
+        while open_set:
+            current = heapq.heappop(open_set)[1]
+
+            if np.array_equal(current, goal_grid):
+                # Reconstruct path
+                path = self.reconstruct_path(came_from, current)
+                return self.grid_to_world_path(path, map)
+
+            for neighbor in self.get_neighbors(current, map, robot_radius):
+                tentative_g_score = g_score[tuple(current)] + self.distance(current, neighbor)
+
+                neighbor_key = tuple(neighbor)
+                if tentative_g_score < g_score.get(neighbor_key, float('inf')):
+                    came_from[neighbor_key] = current
+                    g_score[neighbor_key] = tentative_g_score
+                    f_score[neighbor_key] = tentative_g_score + self.heuristic(neighbor, goal_grid)
+
+                    # Add to open set if not already there
+                    if not any(np.array_equal(neighbor, item[1]) for item in open_set):
+                        heapq.heappush(open_set, (f_score[neighbor_key], neighbor))
+
+        return []  # No path found
+
+    def get_neighbors(self, pos: np.ndarray, map: Dict, robot_radius: float) -> List[np.ndarray]:
+        """Get valid neighbors considering humanoid constraints"""
+        neighbors = []
+
+        # 8-connected neighborhood
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+
+                neighbor = pos + np.array([dx, dy])
+
+                # Check map bounds
+                if not self.is_in_map_bounds(neighbor, map):
+                    continue
+
+                # Check collision (considering robot radius)
+                if self.is_collision_free(neighbor, map, robot_radius):
+                    # Check step height constraint
+                    if self.is_step_height_valid(pos, neighbor, map):
+                        # Check slope constraint
+                        if self.is_slope_valid(pos, neighbor, map):
+                            neighbors.append(neighbor)
+
+        return neighbors
+
+    def is_collision_free(self, pos: np.ndarray, map: Dict, robot_radius: float) -> bool:
+        """Check if position is collision-free considering robot radius"""
+        # Check a circular area around the position
+        grid_radius = int(robot_radius / map['resolution'])
+
+        for dx in range(-grid_radius, grid_radius + 1):
+            for dy in range(-grid_radius, grid_radius + 1):
+                check_pos = pos + np.array([dx, dy])
+
+                if self.is_in_map_bounds(check_pos, map):
+                    grid_idx = tuple(check_pos.astype(int))
+                    if map['occupancy'].get(grid_idx, 1) > 0.5:  # Occupied
+                        return False
+
+        return True
+
+    def is_step_height_valid(self, pos1: np.ndarray, pos2: np.ndarray, map: Dict) -> bool:
+        """Check if step height between two positions is acceptable"""
+        h1 = self.get_height(pos1, map)
+        h2 = self.get_height(pos2, map)
+
+        height_diff = abs(h1 - h2)
+        return height_diff <= self.max_step_height
+
+    def is_slope_valid(self, pos1: np.ndarray, pos2: np.ndarray, map: Dict) -> bool:
+        """Check if slope between two positions is acceptable"""
+        h1 = self.get_height(pos1, map)
+        h2 = self.get_height(pos2, map)
+
+        dist_2d = np.linalg.norm(pos2[:2] - pos1[:2])
+        if dist_2d == 0:
+            return True
+
+        slope = abs(h2 - h1) / dist_2d
+        slope_degrees = np.degrees(np.arctan(slope))
+
+        return slope_degrees <= self.max_slope
+
+    def get_height(self, pos: np.ndarray, map: Dict) -> float:
+        """Get terrain height at position"""
+        grid_pos = pos.astype(int)
+        grid_key = tuple(grid_pos)
+        return map['elevation'].get(grid_key, 0.0)
+
+    def is_in_map_bounds(self, pos: np.ndarray, map: Dict) -> bool:
+        """Check if position is within map bounds"""
+        min_bounds = map['bounds']['min']
+        max_bounds = map['bounds']['max']
+
+        return (min_bounds[0] <= pos[0] <= max_bounds[0] and
+                min_bounds[1] <= pos[1] <= max_bounds[1])
+
+    def world_to_grid(self, pos: np.ndarray, map: Dict) -> np.ndarray:
+        """Convert world coordinates to grid coordinates"""
+        origin = map['origin']
+        resolution = map['resolution']
+        return ((pos - origin[:2]) / resolution).astype(int)
+
+    def grid_to_world(self, grid_pos: np.ndarray, map: Dict) -> np.ndarray:
+        """Convert grid coordinates to world coordinates"""
+        origin = map['origin']
+        resolution = map['resolution']
+        return grid_pos * resolution + origin[:2]
+
+    def grid_to_world_path(self, grid_path: List[np.ndarray], map: Dict) -> List[np.ndarray]:
+        """Convert grid path to world coordinates"""
+        world_path = []
+        for grid_pos in grid_path:
+            world_pos = self.grid_to_world(grid_pos, map)
+            # Add Z coordinate from map
+            z = self.get_height(grid_pos, map)
+            world_pos = np.append(world_pos, z)
+            world_path.append(world_pos)
+        return world_path
+
+    def heuristic(self, pos1: np.ndarray, pos2: np.ndarray) -> float:
+        """Heuristic function for A*"""
+        return np.linalg.norm(pos1 - pos2)
+
+    def distance(self, pos1: np.ndarray, pos2: np.ndarray) -> float:
+        """Distance function"""
+        return np.linalg.norm(pos1 - pos2)
+
+    def reconstruct_path(self, came_from: Dict, current: np.ndarray) -> List[np.ndarray]:
+        """Reconstruct path from A* search"""
+        path = [current]
+        current_key = tuple(current)
+
+        while current_key in came_from:
+            current = came_from[current_key]
+            path.append(current)
+            current_key = tuple(current)
+
+        path.reverse()
+        return path
+
+    def lift_path_to_3d(self, path_2d: List[np.ndarray], map: Dict) -> List[np.ndarray]:
+        """Lift 2D path to 3D considering terrain"""
+        path_3d = []
+
+        for pos_2d in path_2d:
+            z = self.get_height(pos_2d.astype(int), map)
+            pos_3d = np.array([pos_2d[0], pos_2d[1], z])
+            path_3d.append(pos_3d)
+
+        return path_3d
+
+class HumanoidTrajectoryExecutor:
+    """Execute trajectories for humanoid robot navigation"""
+
+    def __init__(self):
+        self.current_trajectory = None
+        self.execution_status = "idle"
+        self.speed_profiles = {
+            "slow": {"max_vel": 0.3, "max_acc": 0.5},
+            "normal": {"max_vel": 0.6, "max_acc": 1.0},
+            "fast": {"max_vel": 1.0, "max_acc": 1.5}
+        }
+
+    def execute_to_waypoint(
+        self,
+        waypoint: np.ndarray,
+        speed_profile: str = "normal"
+    ) -> bool:
+        """Execute trajectory to reach a waypoint"""
+
+        if speed_profile not in self.speed_profiles:
+            speed_profile = "normal"
+
+        profile = self.speed_profiles[speed_profile]
+
+        # Generate trajectory to waypoint
+        trajectory = self.generate_trajectory_to_waypoint(waypoint, profile)
+
+        # Execute trajectory
+        success = self.follow_trajectory(trajectory)
+
+        return success
+
+    def generate_trajectory_to_waypoint(
+        self,
+        waypoint: np.ndarray,
+        profile: Dict
+    ) -> List[Dict]:
+        """Generate trajectory to reach waypoint"""
+
+        # This would interface with humanoid robot's motion planning system
+        # For now, return a simple straight-line trajectory
+
+        current_pos = self.get_current_position()  # Would get from robot state
+
+        # Calculate trajectory points
+        distance = np.linalg.norm(waypoint - current_pos)
+        num_points = max(10, int(distance / 0.1))  # 10cm spacing
+
+        trajectory = []
+        for i in range(num_points + 1):
+            t = i / num_points if num_points > 0 else 0
+            pos = current_pos + t * (waypoint - current_pos)
+
+            trajectory.append({
+                'position': pos,
+                'timestamp': time.time() + t * (distance / profile['max_vel']),
+                'velocity': profile['max_vel'] * (waypoint - current_pos) / distance if distance > 0 else np.zeros(3)
+            })
+
+        return trajectory
+
+    def follow_trajectory(self, trajectory: List[Dict]) -> bool:
+        """Follow the generated trajectory"""
+
+        self.execution_status = "executing"
+
+        for point in trajectory:
+            # Send position command to robot
+            success = self.send_position_command(point['position'])
+
+            if not success:
+                self.execution_status = "failed"
+                return False
+
+            # Wait for robot to reach position (with timeout)
+            if not self.wait_for_reach(point['position'], timeout=5.0):
+                self.execution_status = "timeout"
+                return False
+
+        self.execution_status = "completed"
+        return True
+
+    def get_current_position(self) -> np.ndarray:
+        """Get current robot position"""
+        # This would interface with robot's state estimation
+        return np.array([0.0, 0.0, 0.0])  # Placeholder
+
+    def send_position_command(self, position: np.ndarray) -> bool:
+        """Send position command to robot"""
+        # This would interface with robot's control system
+        return True  # Placeholder
+
+    def wait_for_reach(self, target_pos: np.ndarray, timeout: float = 5.0) -> bool:
+        """Wait for robot to reach target position"""
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            current_pos = self.get_current_position()
+            distance = np.linalg.norm(current_pos - target_pos)
+
+            if distance < 0.1:  # 10cm tolerance
+                return True
+
+            time.sleep(0.1)
+
+        return False  # Timeout
+
+    def stop_motion(self):
+        """Stop robot motion immediately"""
+        # Send emergency stop command to robot
+        pass
+
+class HumanoidSafetyMonitor:
+    """Safety monitoring for humanoid robot navigation"""
+
+    def __init__(self):
+        self.safety_thresholds = {
+            'min_distance_to_obstacle': 0.5,  # 50cm
+            'max_angular_velocity': 1.0,      # 1 rad/s
+            'max_linear_velocity': 1.0,       # 1 m/s
+            'max_torque': 100.0               # 100 Nm
+        }
+        self.robot_pose = None
+        self.collision_warning = False
+
+    def update_pose(self, pose: Dict):
+        """Update with current robot pose"""
+        self.robot_pose = pose
+
+    def check_safety(self) -> bool:
+        """Check if current state is safe"""
+
+        if not self.robot_pose:
+            return False
+
+        # Check proximity to obstacles
+        if self.check_obstacle_proximity():
+            return False
+
+        # Check velocity limits
+        if self.check_velocity_limits():
+            return False
+
+        # Check torque limits
+        if self.check_torque_limits():
+            return False
+
+        return True
+
+    def check_obstacle_proximity(self) -> bool:
+        """Check if robot is too close to obstacles"""
+        # This would interface with proximity sensors
+        return False  # Placeholder
+
+    def check_velocity_limits(self) -> bool:
+        """Check if velocities are within safe limits"""
+        # This would check current velocities against thresholds
+        return False  # Placeholder
+
+    def check_torque_limits(self) -> bool:
+        """Check if torques are within safe limits"""
+        # This would check current torques against thresholds
+        return False  # Placeholder
+
+class HumanDetector:
+    """Detect humans in SLAM map for social navigation"""
+
+    def __init__(self):
+        self.detection_model = self.load_detection_model()
+
+    def load_detection_model(self):
+        """Load human detection model"""
+        # This would load a pre-trained model like YOLO or similar
+        return None  # Placeholder
+
+    def detect_humans(self) -> List[Dict]:
+        """Detect humans in current environment"""
+        # This would run detection on current camera images
+        # and return list of human positions and velocities
+        return []  # Placeholder
+
+class SocialNavigationPlanner:
+    """Plan paths that consider human presence and social norms"""
+
+    def __init__(self):
+        self.social_force_model = SocialForceModel()
+
+    def plan_path(
+        self,
+        start: np.ndarray,
+        goal: np.ndarray,
+        humans: List[Dict],
+        map: Dict
+    ) -> List[np.ndarray]:
+        """Plan socially-aware path"""
+
+        # Use social force model to consider human movements
+        social_path = self.social_force_model.plan_with_humans(
+            start, goal, humans, map
+        )
+
+        return social_path
+
+class SocialForceModel:
+    """Implementation of social force model for human-aware navigation"""
+
+    def __init__(self):
+        self.pedestrian_repulsion = 1.0
+        self.wall_repulsion = 2.0
+        self.attraction_strength = 1.0
+
+    def plan_with_humans(
+        self,
+        start: np.ndarray,
+        goal: np.ndarray,
+        humans: List[Dict],
+        map: Dict
+    ) -> List[np.ndarray]:
+        """Plan path using social force model"""
+
+        # This would implement the social force model algorithm
+        # which considers repulsive forces from humans and obstacles
+        # and attractive force toward the goal
+
+        # For now, return a simple path with human avoidance
+        base_path = self.plan_base_path(start, goal, map)
+        social_path = self.add_human_avoidance(base_path, humans)
+
+        return social_path
+
+    def plan_base_path(self, start: np.ndarray, goal: np.ndarray, map: Dict) -> List[np.ndarray]:
+        """Plan basic path without social considerations"""
+        # This would call the regular path planner
+        return [start, goal]  # Placeholder
+
+    def add_human_avoidance(self, path: List[np.ndarray], humans: List[Dict]) -> List[np.ndarray]:
+        """Add human avoidance to path"""
+        # Modify path to avoid humans based on their predicted movements
+        return path  # Placeholder
+```
+
+## Performance Optimization and Evaluation
+
+### Benchmarking SLAM Systems
+
+Evaluating SLAM system performance requires comprehensive metrics that assess both accuracy and computational efficiency, especially critical for real-time humanoid robot applications.
+
+```python
+import time
+from typing import Dict, List, Tuple
+import statistics
+import matplotlib.pyplot as plt
+
+class SLAMBenchmarkSuite:
+    """Comprehensive benchmarking suite for SLAM systems"""
+
+    def __init__(self):
+        self.metrics = {
+            'accuracy': {},
+            'efficiency': {},
+            'robustness': {},
+            'real_time_performance': {}
+        }
+        self.benchmark_results = {}
+        self.ground_truth_available = False
+
+    def run_comprehensive_benchmark(
+        self,
+        slam_system,
+        dataset: List[Dict],
+        ground_truth: Optional[List[Dict]] = None
+    ) -> Dict[str, float]:
+        """Run comprehensive benchmark on SLAM system"""
+
+        if ground_truth:
+            self.ground_truth_available = True
+            self.align_ground_truth(ground_truth)
+
+        print("Starting SLAM benchmarking...")
+
+        # Run accuracy benchmarks
+        accuracy_results = self.benchmark_accuracy(slam_system, dataset, ground_truth)
+
+        # Run efficiency benchmarks
+        efficiency_results = self.benchmark_efficiency(slam_system, dataset)
+
+        # Run robustness benchmarks
+        robustness_results = self.benchmark_robustness(slam_system, dataset)
+
+        # Run real-time performance benchmarks
+        real_time_results = self.benchmark_real_time(slam_system, dataset)
+
+        # Compile results
+        self.benchmark_results = {
+            'accuracy': accuracy_results,
+            'efficiency': efficiency_results,
+            'robustness': robustness_results,
+            'real_time_performance': real_time_results,
+            'overall_score': self.calculate_overall_score(
+                accuracy_results, efficiency_results,
+                robustness_results, real_time_results
+            )
+        }
+
+        return self.benchmark_results
+
+    def benchmark_accuracy(
+        self,
+        slam_system,
+        dataset: List[Dict],
+        ground_truth: Optional[List[Dict]]
+    ) -> Dict[str, float]:
+        """Benchmark accuracy metrics"""
+
+        if not ground_truth:
+            print("Warning: No ground truth provided for accuracy benchmark")
+            return {'accuracy_warning': True}
+
+        translation_errors = []
+        rotation_errors = []
+        absolute_trajectory_errors = []
+
+        for i, (data, gt) in enumerate(zip(dataset, ground_truth)):
+            # Process frame through SLAM
+            slam_result = slam_system.process_frame(
+                data['image'], data['imu'], data['timestamp']
+            )
+
+            # Calculate errors against ground truth
+            if slam_result and 'pose' in slam_result:
+                gt_pose = gt['pose']
+                est_pose = slam_result['pose']
+
+                # Translation error
+                trans_error = np.linalg.norm(
+                    np.array(gt_pose['position']) - np.array(est_pose['position'])
+                )
+                translation_errors.append(trans_error)
+
+                # Rotation error (in degrees)
+                gt_rot = np.array(gt_pose['orientation'])  # quaternion
+                est_rot = np.array(est_pose['orientation'])
+                rot_error = self.quaternion_distance(gt_rot, est_rot)
+                rotation_errors.append(rot_error)
+
+        # Calculate accuracy metrics
+        results = {
+            'mean_translation_error': statistics.mean(translation_errors) if translation_errors else float('inf'),
+            'median_translation_error': statistics.median(translation_errors) if translation_errors else float('inf'),
+            'std_translation_error': statistics.stdev(translation_errors) if len(translation_errors) > 1 else 0,
+            'max_translation_error': max(translation_errors) if translation_errors else float('inf'),
+            'mean_rotation_error': statistics.mean(rotation_errors) if rotation_errors else float('inf'),
+            'ate_translation_median': statistics.median(translation_errors) if translation_errors else float('inf'),
+            'ate_translation_mean': statistics.mean(translation_errors) if translation_errors else float('inf'),
+            'ate_translation_rms': np.sqrt(np.mean(np.array(translation_errors)**2)) if translation_errors else float('inf')
+        }
+
+        return results
+
+    def quaternion_distance(self, q1: np.ndarray, q2: np.ndarray) -> float:
+        """Calculate rotation error between two quaternions in degrees"""
+        # Calculate the relative quaternion
+        q_rel = self.quaternion_multiply(self.quaternion_inverse(q1), q2)
+
+        # Convert to angle (in radians, then to degrees)
+        angle = 2 * np.arccos(abs(q_rel[0]))  # w component
+        return np.degrees(angle)
+
+    def quaternion_inverse(self, q: np.ndarray) -> np.ndarray:
+        """Calculate quaternion inverse"""
+        return np.array([q[0], -q[1], -q[2], -q[3]]) / np.sum(q**2)
+
+    def quaternion_multiply(self, q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
+        """Multiply two quaternions"""
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+
+        w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+        x = w1*x2 + x1*w2 + y1*z2 - z1*y2
+        y = w1*y2 - x1*z2 + y1*w2 + z1*x2
+        z = w1*z2 + x1*y2 - y1*x2 + z1*w2
+
+        return np.array([w, x, y, z])
+
+    def benchmark_efficiency(self, slam_system, dataset: List[Dict]) -> Dict[str, float]:
+        """Benchmark computational efficiency"""
+
+        processing_times = []
+        memory_usage = []
+
+        for data in dataset:
+            # Measure processing time
+            start_time = time.time()
+
+            # Process frame
+            slam_result = slam_system.process_frame(
+                data['image'], data['imu'], data['timestamp']
+            )
+
+            end_time = time.time()
+            processing_time = end_time - start_time
+            processing_times.append(processing_time)
+
+            # Measure memory usage (simplified)
+            memory_usage.append(self.estimate_memory_usage(slam_system))
+
+        results = {
+            'mean_processing_time': statistics.mean(processing_times),
+            'median_processing_time': statistics.median(processing_times),
+            'max_processing_time': max(processing_times),
+            'min_processing_time': min(processing_times),
+            'processing_time_std': statistics.stdev(processing_times) if len(processing_times) > 1 else 0,
+            'frames_per_second': 1.0 / statistics.mean(processing_times),
+            'mean_memory_usage': statistics.mean(memory_usage) if memory_usage else 0,
+            'peak_memory_usage': max(memory_usage) if memory_usage else 0,
+            'real_time_factor': np.mean(processing_times) * len(dataset) / self.calculate_dataset_duration(dataset)
+        }
+
+        return results
+
+    def estimate_memory_usage(self, slam_system) -> float:
+        """Estimate memory usage of SLAM system"""
+        # This would interface with system memory monitoring
+        # For now, return a placeholder
+        return 100.0  # MB
+
+    def calculate_dataset_duration(self, dataset: List[Dict]) -> float:
+        """Calculate total duration of dataset"""
+        if not dataset:
+            return 0.0
+        return dataset[-1]['timestamp'] - dataset[0]['timestamp']
+
+    def benchmark_robustness(self, slam_system, dataset: List[Dict]) -> Dict[str, float]:
+        """Benchmark system robustness"""
+
+        tracking_success = []
+        relocalization_success = []
+        map_consistency = []
+
+        for i, data in enumerate(dataset):
+            # Process frame and check tracking status
+            slam_result = slam_system.process_frame(
+                data['image'], data['imu'], data['timestamp']
+            )
+
+            if slam_result:
+                tracking_success.append(slam_result.get('tracking_status', 'LOST') == 'OK')
+
+                # Check for relocalization events
+                if slam_result.get('relocalization_performed', False):
+                    relocalization_success.append(slam_result.get('relocalization_success', False))
+
+                # Check map consistency
+                map_quality = slam_result.get('map_quality', 0.0)
+                map_consistency.append(map_quality)
+
+        results = {
+            'tracking_success_rate': sum(tracking_success) / len(tracking_success) if tracking_success else 0.0,
+            'relocalization_success_rate': sum(relocalization_success) / len(relocalization_success) if relocalization_success else 0.0,
+            'mean_map_consistency': statistics.mean(map_consistency) if map_consistency else 0.0,
+            'map_coverage': self.calculate_map_coverage(slam_system),
+            'feature_stability': self.calculate_feature_stability(slam_system),
+            'loop_closure_success_rate': self.calculate_loop_closure_success(slam_system)
+        }
+
+        return results
+
+    def calculate_map_coverage(self, slam_system) -> float:
+        """Calculate map coverage metric"""
+        # This would calculate the percentage of environment mapped
+        return 0.7  # Placeholder
+
+    def calculate_feature_stability(self, slam_system) -> float:
+        """Calculate feature tracking stability"""
+        # This would measure how consistently features are tracked
+        return 0.85  # Placeholder
+
+    def calculate_loop_closure_success(self, slam_system) -> float:
+        """Calculate loop closure success rate"""
+        # This would measure how often loop closures are successfully detected and optimized
+        return 0.9  # Placeholder
+
+    def benchmark_real_time(self, slam_system, dataset: List[Dict]) -> Dict[str, float]:
+        """Benchmark real-time performance"""
+
+        # Simulate real-time execution
+        real_time_performance = []
+        deadline_misses = 0
+
+        for i, data in enumerate(dataset):
+            # Simulate real-time constraints
+            expected_interval = 1.0 / 30.0  # 30 FPS
+            start_time = time.time()
+
+            # Process frame
+            slam_result = slam_system.process_frame(
+                data['image'], data['imu'], data['timestamp']
+            )
+
+            end_time = time.time()
+            processing_time = end_time - start_time
+
+            # Check if deadline was met
+            if processing_time > expected_interval:
+                deadline_misses += 1
+
+            real_time_performance.append({
+                'processing_time': processing_time,
+                'deadline_met': processing_time <= expected_interval,
+                'latency': processing_time
+            })
+
+        results = {
+            'deadline_success_rate': 1.0 - (deadline_misses / len(dataset)),
+            'mean_latency': statistics.mean([r['processing_time'] for r in real_time_performance]),
+            'max_latency': max([r['processing_time'] for r in real_time_performance]),
+            'latency_jitter': statistics.stdev([r['processing_time'] for r in real_time_performance]),
+            'real_time_compliance': self.calculate_real_time_compliance(real_time_performance),
+            'throughput': len(dataset) / self.calculate_dataset_duration(dataset)
+        }
+
+        return results
+
+    def calculate_real_time_compliance(self, performance_data: List[Dict]) -> float:
+        """Calculate real-time compliance metric"""
+        compliant_frames = sum(1 for data in performance_data if data['deadline_met'])
+        return compliant_frames / len(performance_data) if performance_data else 0.0
+
+    def calculate_overall_score(
+        self,
+        accuracy: Dict,
+        efficiency: Dict,
+        robustness: Dict,
+        real_time: Dict
+    ) -> float:
+        """Calculate overall SLAM performance score"""
+
+        # Weighted combination of metrics
+        accuracy_score = self.normalize_accuracy_score(accuracy)
+        efficiency_score = self.normalize_efficiency_score(efficiency)
+        robustness_score = self.normalize_robustness_score(robustness)
+        real_time_score = self.normalize_real_time_score(real_time)
+
+        # Weighted average (adjust weights based on application requirements)
+        weights = {
+            'accuracy': 0.3,
+            'efficiency': 0.25,
+            'robustness': 0.25,
+            'real_time': 0.2
+        }
+
+        overall_score = (
+            weights['accuracy'] * accuracy_score +
+            weights['efficiency'] * efficiency_score +
+            weights['robustness'] * robustness_score +
+            weights['real_time'] * real_time_score
+        )
+
+        return overall_score
+
+    def normalize_accuracy_score(self, accuracy: Dict) -> float:
+        """Normalize accuracy metrics to 0-1 scale"""
+        if 'mean_translation_error' in accuracy:
+            # Lower error = higher score
+            error = accuracy['mean_translation_error']
+            # Normalize assuming 0.1m is excellent, 1.0m is poor
+            score = max(0, min(1, (1.0 - error) / 0.9)) if error <= 1.0 else 0.0
+        else:
+            score = 0.5  # Unknown
+
+        return score
+
+    def normalize_efficiency_score(self, efficiency: Dict) -> float:
+        """Normalize efficiency metrics to 0-1 scale"""
+        fps = efficiency.get('frames_per_second', 0)
+        # Target 30 FPS for real-time operation
+        score = min(1.0, fps / 30.0) if fps > 0 else 0.0
+        return score
+
+    def normalize_robustness_score(self, robustness: Dict) -> float:
+        """Normalize robustness metrics to 0-1 scale"""
+        tracking_rate = robustness.get('tracking_success_rate', 0.0)
+        return tracking_rate
+
+    def normalize_real_time_score(self, real_time: Dict) -> float:
+        """Normalize real-time performance to 0-1 scale"""
+        compliance = real_time.get('deadline_success_rate', 0.0)
+        return compliance
+
+    def generate_benchmark_report(self, results: Dict) -> str:
+        """Generate comprehensive benchmark report"""
+
+        report = "SLAM BENCHMARK REPORT\n"
+        report += "=" * 50 + "\n\n"
+
+        report += "ACCURACY METRICS:\n"
+        for key, value in results['accuracy'].items():
+            report += f"  {key}: {value}\n"
+        report += "\n"
+
+        report += "EFFICIENCY METRICS:\n"
+        for key, value in results['efficiency'].items():
+            report += f"  {key}: {value}\n"
+        report += "\n"
+
+        report += "ROBUSTNESS METRICS:\n"
+        for key, value in results['robustness'].items():
+            report += f"  {key}: {value}\n"
+        report += "\n"
+
+        report += "REAL-TIME PERFORMANCE:\n"
+        for key, value in results['real_time_performance'].items():
+            report += f"  {key}: {value}\n"
+        report += "\n"
+
+        report += f"OVERALL SCORE: {results['overall_score']:.3f}\n"
+
+        return report
+
+    def plot_benchmark_results(self, results: Dict, save_path: str = None):
+        """Plot benchmark results"""
+
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+
+        # Accuracy plot
+        accuracy_metrics = list(results['accuracy'].keys())[:5]  # First 5 metrics
+        accuracy_values = list(results['accuracy'].values())[:5]
+        axes[0, 0].bar(range(len(accuracy_metrics)), accuracy_values)
+        axes[0, 0].set_title('Accuracy Metrics')
+        axes[0, 0].set_xticks(range(len(accuracy_metrics)))
+        axes[0, 0].set_xticklabels(accuracy_metrics, rotation=45, ha='right')
+
+        # Efficiency plot
+        efficiency_metrics = list(results['efficiency'].keys())[:5]
+        efficiency_values = list(results['efficiency'].values())[:5]
+        axes[0, 1].bar(range(len(efficiency_metrics)), efficiency_values)
+        axes[0, 1].set_title('Efficiency Metrics')
+        axes[0, 1].set_xticks(range(len(efficiency_metrics)))
+        axes[0, 1].set_xticklabels(efficiency_metrics, rotation=45, ha='right')
+
+        # Robustness plot
+        robustness_metrics = list(results['robustness'].keys())[:5]
+        robustness_values = list(results['robustness'].values())[:5]
+        axes[1, 0].bar(range(len(robustness_metrics)), robustness_values)
+        axes[1, 0].set_title('Robustness Metrics')
+        axes[1, 0].set_xticks(range(len(robustness_metrics)))
+        axes[1, 0].set_xticklabels(robustness_metrics, rotation=45, ha='right')
+
+        # Real-time performance plot
+        real_time_metrics = list(results['real_time_performance'].keys())[:5]
+        real_time_values = list(results['real_time_performance'].values())[:5]
+        axes[1, 1].bar(range(len(real_time_metrics)), real_time_values)
+        axes[1, 1].set_title('Real-time Performance')
+        axes[1, 1].set_xticks(range(len(real_time_metrics)))
+        axes[1, 1].set_xticklabels(real_time_metrics, rotation=45, ha='right')
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path)
+        plt.show()
+
+class SLAMOptimizer:
+    """Optimization framework for SLAM systems"""
+
+    def __init__(self, slam_system):
+        self.slam = slam_system
+        self.param_ranges = self.define_parameter_ranges()
+        self.optimization_history = []
+
+    def define_parameter_ranges(self) -> Dict:
+        """Define ranges for SLAM parameters to optimize"""
+        return {
+            'feature_detector_threshold': (0.001, 0.01),
+            'max_features': (500, 2000),
+            'tracking_threshold': (5, 20),
+            'relocalization_threshold': (20, 100),
+            'bundle_adjustment_frequency': (5, 50),
+            'loop_closure_threshold': (0.1, 1.0),
+            'map_merging_threshold': (0.5, 2.0)
+        }
+
+    def optimize_parameters(
+        self,
+        dataset: List[Dict],
+        ground_truth: List[Dict],
+        num_iterations: int = 50
+    ) -> Dict:
+        """Optimize SLAM parameters using Bayesian optimization"""
+
+        from skopt import gp_minimize
+        from skopt.space import Real, Integer
+
+        # Define search space
+        dimensions = []
+        for param_name, (low, high) in self.param_ranges.items():
+            if isinstance(low, int):
+                dimensions.append(Integer(low, high, name=param_name))
+            else:
+                dimensions.append(Real(low, high, name=param_name))
+
+        # Objective function
+        def objective(params):
+            # Set parameters in SLAM system
+            param_dict = {}
+            for i, param_name in enumerate(self.param_ranges.keys()):
+                param_dict[param_name] = params[i]
+
+            self.set_slam_parameters(param_dict)
+
+            # Evaluate performance
+            benchmark = SLAMBenchmarkSuite()
+            results = benchmark.run_comprehensive_benchmark(
+                self.slam, dataset, ground_truth
+            )
+
+            # Return negative of overall score (minimize negative = maximize positive)
+            return -results['overall_score']
+
+        # Run optimization
+        res = gp_minimize(
+            func=objective,
+            dimensions=dimensions,
+            n_calls=num_iterations,
+            random_state=42
+        )
+
+        # Set optimal parameters
+        optimal_params = {}
+        for i, param_name in enumerate(self.param_ranges.keys()):
+            optimal_params[param_name] = res.x[i]
+
+        self.set_slam_parameters(optimal_params)
+
+        return {
+            'optimal_parameters': optimal_params,
+            'optimal_score': -res.fun,
+            'optimization_history': res.func_vals
+        }
+
+    def set_slam_parameters(self, params: Dict):
+        """Set parameters in SLAM system"""
+        # This would interface with the specific SLAM system
+        # to set the optimized parameters
+        pass
+
+    def adaptive_parameter_tuning(self, current_metrics: Dict):
+        """Adapt SLAM parameters based on current performance metrics"""
+
+        adjustments = {}
+
+        # Adjust feature detection based on tracking quality
+        if current_metrics.get('tracking_success_rate', 1.0) < 0.8:
+            adjustments['feature_detector_threshold'] = 'decrease'  # Detect more features
+            adjustments['max_features'] = 'increase'
+
+        # Adjust optimization frequency based on computational load
+        if current_metrics.get('mean_processing_time', 0.1) > 0.033:  # >30 FPS
+            adjustments['bundle_adjustment_frequency'] = 'decrease'
+            adjustments['loop_closure_frequency'] = 'decrease'
+
+        # Adjust relocalization sensitivity based on failure rate
+        if current_metrics.get('relocalization_success_rate', 1.0) < 0.7:
+            adjustments['relocalization_threshold'] = 'decrease'  # Be more sensitive
+
+        return adjustments
+```
+
+## Troubleshooting Common SLAM Issues
+
+### Diagnosing and Resolving SLAM Problems
+
+SLAM systems can encounter various issues that affect performance. Understanding these problems and their solutions is crucial for maintaining robust operation.
+
+```python
+class SLAMTroubleshooter:
+    """Diagnostic and troubleshooting system for SLAM issues"""
+
+    def __init__(self):
+        self.diagnostic_rules = self.create_diagnostic_rules()
+        self.solution_database = self.create_solution_database()
+        self.common_issues = self.identify_common_issues()
+
+    def create_diagnostic_rules(self) -> Dict[str, Dict]:
+        """Create diagnostic rules for SLAM problems"""
+        return {
+            'tracking_failure': {
+                'conditions': [
+                    'low_feature_count < 50',
+                    'high_reprojection_error > 5.0',
+                    'tracking_status == "LOST"'
+                ],
+                'severity': 'high',
+                'symptoms': ['drift', 'position_inaccuracy', 'map_inconsistency']
+            },
+            'loop_closure_failure': {
+                'conditions': [
+                    'low_recognition_rate < 0.1',
+                    'high_descriptor_distance > 0.8',
+                    'loop_closure_attempts > 100'
+                ],
+                'severity': 'medium',
+                'symptoms': ['map_drift', 'inconsistent_localization']
+            },
+            'map_quality_degradation': {
+                'conditions': [
+                    'high_map_uncertainty > 0.5',
+                    'low_feature_visibility < 0.3',
+                    'high_reprojection_error > 3.0'
+                ],
+                'severity': 'medium',
+                'symptoms': ['poor_navigation', 'localization_drift']
+            },
+            'real_time_performance': {
+                'conditions': [
+                    'processing_time > 0.033',  # >30 FPS
+                    'deadline_misses > 10',
+                    'memory_usage > 2000'  # MB
+                ],
+                'severity': 'high',
+                'symptoms': ['lag', 'frame_drops', 'system_instability']
+            }
+        }
+
+    def create_solution_database(self) -> Dict[str, List[str]]:
+        """Create database of solutions for SLAM issues"""
+        return {
+            'tracking_failure': [
+                "Increase feature detection threshold",
+                "Improve lighting conditions",
+                "Reduce camera motion speed",
+                "Check camera calibration",
+                "Verify IMU functionality"
+            ],
+            'loop_closure_failure': [
+                "Improve map texture richness",
+                "Adjust loop closure detection parameters",
+                "Increase descriptor matching threshold",
+                "Verify geometric verification settings",
+                "Check for repetitive environments"
+            ],
+            'map_quality_degradation': [
+                "Reduce bundle adjustment frequency",
+                "Increase feature tracking window",
+                "Improve sensor fusion parameters",
+                "Verify camera-IMU calibration",
+                "Check for sensor drift"
+            ],
+            'real_time_performance': [
+                "Reduce feature count",
+                "Use lower resolution images",
+                "Optimize algorithm parameters",
+                "Upgrade hardware if necessary",
+                "Reduce optimization frequency"
+            ],
+            'drift_accumulation': [
+                "Enable loop closure detection",
+                "Improve bundle adjustment settings",
+                "Verify IMU calibration",
+                "Check for systematic errors",
+                "Implement relocalization"
+            ],
+            'occlusion_handling': [
+                "Use multiple camera viewpoints",
+                "Implement temporal consistency checks",
+                "Improve feature descriptor quality",
+                "Use semantic information",
+                "Implement prediction models"
+            ]
+        }
+
+    def diagnose_slam_state(self, slam_metrics: Dict) -> Dict[str, Any]:
+        """Diagnose SLAM system state and identify issues"""
+
+        issues_found = []
+
+        # Check for tracking failure
+        if self.detect_tracking_failure(slam_metrics):
+            issues_found.append({
+                'issue': 'tracking_failure',
+                'severity': 'high',
+                'confidence': self.assess_tracking_confidence(slam_metrics)
+            })
+
+        # Check for loop closure issues
+        if self.detect_loop_closure_issues(slam_metrics):
+            issues_found.append({
+                'issue': 'loop_closure_failure',
+                'severity': 'medium',
+                'confidence': self.assess_loop_confidence(slam_metrics)
+            })
+
+        # Check for map quality issues
+        if self.detect_map_quality_issues(slam_metrics):
+            issues_found.append({
+                'issue': 'map_quality_degradation',
+                'severity': 'medium',
+                'confidence': self.assess_map_confidence(slam_metrics)
+            })
+
+        # Check for performance issues
+        if self.detect_performance_issues(slam_metrics):
+            issues_found.append({
+                'issue': 'real_time_performance',
+                'severity': 'high',
+                'confidence': self.assess_performance_confidence(slam_metrics)
+            })
+
+        return {
+            'issues_found': issues_found,
+            'diagnosis_confidence': self.calculate_diagnosis_confidence(issues_found),
+            'recommended_solutions': self.get_solutions_for_issues(issues_found),
+            'immediate_actions': self.get_immediate_actions(issues_found)
+        }
+
+    def detect_tracking_failure(self, metrics: Dict) -> bool:
+        """Detect tracking failure conditions"""
+        feature_count = metrics.get('current_features', 0)
+        reprojection_error = metrics.get('mean_reprojection_error', float('inf'))
+        tracking_status = metrics.get('tracking_status', 'OK')
+
+        return (feature_count < 50 or
+                reprojection_error > 5.0 or
+                tracking_status == 'LOST')
+
+    def detect_loop_closure_issues(self, metrics: Dict) -> bool:
+        """Detect loop closure problems"""
+        recognition_rate = metrics.get('loop_closure_recognition_rate', 1.0)
+        attempts = metrics.get('loop_closure_attempts', 0)
+        success_rate = metrics.get('loop_closure_success_rate', 1.0)
+
+        return (recognition_rate < 0.1 or
+                attempts > 100 or
+                success_rate < 0.3)
+
+    def detect_map_quality_issues(self, metrics: Dict) -> bool:
+        """Detect map quality degradation"""
+        uncertainty = metrics.get('map_uncertainty', 0.0)
+        visibility = metrics.get('feature_visibility_ratio', 1.0)
+        reprojection_error = metrics.get('mean_reprojection_error', 0.0)
+
+        return (uncertainty > 0.5 or
+                visibility < 0.3 or
+                reprojection_error > 3.0)
+
+    def detect_performance_issues(self, metrics: Dict) -> bool:
+        """Detect performance bottlenecks"""
+        processing_time = metrics.get('mean_processing_time', 0.0)
+        deadline_misses = metrics.get('deadline_misses', 0)
+        memory_usage = metrics.get('current_memory_usage', 0)
+
+        return (processing_time > 0.033 or  # >30 FPS
+                deadline_misses > 10 or
+                memory_usage > 2000)  # MB
+
+    def assess_tracking_confidence(self, metrics: Dict) -> float:
+        """Assess confidence in tracking diagnosis"""
+        feature_count = metrics.get('current_features', 0)
+        reprojection_error = metrics.get('mean_reprojection_error', float('inf'))
+
+        # Higher confidence if multiple indicators present
+        confidence = 0.0
+        if feature_count < 30:
+            confidence += 0.4
+        if reprojection_error > 10.0:
+            confidence += 0.3
+        if metrics.get('tracking_status') == 'LOST':
+            confidence += 0.3
+
+        return min(confidence, 1.0)
+
+    def assess_loop_confidence(self, metrics: Dict) -> float:
+        """Assess confidence in loop closure diagnosis"""
+        recognition_rate = metrics.get('loop_closure_recognition_rate', 1.0)
+        success_rate = metrics.get('loop_closure_success_rate', 1.0)
+
+        return 1.0 - min(recognition_rate, success_rate)
+
+    def assess_map_confidence(self, metrics: Dict) -> float:
+        """Assess confidence in map quality diagnosis"""
+        uncertainty = metrics.get('map_uncertainty', 0.0)
+        visibility = metrics.get('feature_visibility_ratio', 1.0)
+
+        return max(uncertainty, 1.0 - visibility)
+
+    def assess_performance_confidence(self, metrics: Dict) -> float:
+        """Assess confidence in performance diagnosis"""
+        processing_time = metrics.get('mean_processing_time', 0.0)
+        deadline_rate = metrics.get('deadline_success_rate', 1.0)
+
+        time_pressure = processing_time / 0.033  # Normalize to 30 FPS target
+        return max(time_pressure, 1.0 - deadline_rate)
+
+    def calculate_diagnosis_confidence(self, issues: List[Dict]) -> float:
+        """Calculate overall diagnosis confidence"""
+        if not issues:
+            return 0.0
+
+        total_confidence = sum(issue['confidence'] for issue in issues)
+        return total_confidence / len(issues)
+
+    def get_solutions_for_issues(self, issues: List[Dict]) -> List[str]:
+        """Get solutions for identified issues"""
+        all_solutions = []
+
+        for issue in issues:
+            issue_type = issue['issue']
+            if issue_type in self.solution_database:
+                all_solutions.extend(self.solution_database[issue_type])
+
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(all_solutions))
+
+    def get_immediate_actions(self, issues: List[Dict]) -> List[str]:
+        """Get immediate actions for critical issues"""
+        immediate_actions = []
+
+        for issue in issues:
+            if issue['severity'] == 'high':
+                if issue['issue'] == 'tracking_failure':
+                    immediate_actions.extend([
+                        "Initiate relocalization procedure",
+                        "Reduce robot motion speed",
+                        "Switch to safe recovery mode"
+                    ])
+                elif issue['issue'] == 'real_time_performance':
+                    immediate_actions.extend([
+                        "Reduce feature processing load",
+                        "Switch to simplified tracking mode",
+                        "Alert system operator"
+                    ])
+
+        return immediate_actions
+
+    def run_preventive_checks(self, slam_system) -> Dict[str, bool]:
+        """Run preventive checks to avoid SLAM issues"""
+
+        checks = {
+            'camera_calibration_valid': self.check_camera_calibration(slam_system),
+            'imu_functionality': self.check_imu_functionality(slam_system),
+            'sensor_synchronization': self.check_sensor_sync(slam_system),
+            'environment_suitability': self.check_environment_texture(slam_system),
+            'computational_resources': self.check_resources_available(slam_system)
+        }
+
+        return checks
+
+    def check_camera_calibration(self, slam_system) -> bool:
+        """Check if camera calibration is valid"""
+        # This would verify camera intrinsics and extrinsics
+        return True  # Placeholder
+
+    def check_imu_functionality(self, slam_system) -> bool:
+        """Check if IMU is functioning properly"""
+        # This would verify IMU data quality and calibration
+        return True  # Placeholder
+
+    def check_sensor_sync(self, slam_system) -> bool:
+        """Check if sensors are properly synchronized"""
+        # This would verify timestamp alignment between sensors
+        return True  # Placeholder
+
+    def check_environment_texture(self, slam_system) -> bool:
+        """Check if environment has sufficient texture for SLAM"""
+        # This would analyze image for feature richness
+        return True  # Placeholder
+
+    def check_resources_available(self, slam_system) -> bool:
+        """Check if sufficient computational resources are available"""
+        # This would verify CPU, GPU, and memory availability
+        return True  # Placeholder
+
+    def generate_troubleshooting_report(self, diagnosis: Dict) -> str:
+        """Generate troubleshooting report"""
+
+        report = "SLAM TROUBLESHOOTING REPORT\n"
+        report += "=" * 50 + "\n\n"
+
+        report += f"Diagnosis Confidence: {diagnosis['diagnosis_confidence']:.2f}\n\n"
+
+        report += "ISSUES IDENTIFIED:\n"
+        for issue in diagnosis['issues_found']:
+            report += f"- {issue['issue']} (Severity: {issue['severity']}, Confidence: {issue['confidence']:.2f})\n"
+        report += "\n"
+
+        report += "RECOMMENDED SOLUTIONS:\n"
+        for solution in diagnosis['recommended_solutions']:
+            report += f"- {solution}\n"
+        report += "\n"
+
+        if diagnosis['immediate_actions']:
+            report += "IMMEDIATE ACTIONS REQUIRED:\n"
+            for action in diagnosis['immediate_actions']:
+                report += f"- {action}\n"
+
+        return report
+
+class SLAMHealthMonitor:
+    """Continuous monitoring system for SLAM health"""
+
+    def __init__(self):
+        self.troubleshooter = SLAMTroubleshooter()
+        self.monitoring_history = []
+        self.alert_thresholds = self.set_alert_thresholds()
+
+    def set_alert_thresholds(self) -> Dict[str, float]:
+        """Set thresholds for different alert levels"""
+        return {
+            'tracking_quality': 0.5,      # Below this is problematic
+            'map_accuracy': 0.1,          # Above this error is problematic
+            'processing_time': 0.033,     # 30 FPS threshold
+            'feature_count': 50,          # Minimum features
+            'memory_usage': 0.8,          # 80% of available memory
+            'relocalization_rate': 0.1    # 10% relocalization is concerning
+        }
+
+    def monitor_slam_health(self, slam_metrics: Dict) -> Dict[str, Any]:
+        """Monitor SLAM system health and generate alerts"""
+
+        # Run diagnostic
+        diagnosis = self.troubleshooter.diagnose_slam_state(slam_metrics)
+
+        # Check individual metrics against thresholds
+        alerts = self.check_metric_thresholds(slam_metrics)
+
+        # Generate health report
+        health_status = {
+            'diagnosis': diagnosis,
+            'alerts': alerts,
+            'overall_health': self.calculate_overall_health(slam_metrics, alerts),
+            'trend_analysis': self.analyze_trends(slam_metrics),
+            'maintenance_recommendations': self.get_maintenance_recommendations(slam_metrics)
+        }
+
+        # Store for trend analysis
+        self.monitoring_history.append({
+            'timestamp': time.time(),
+            'metrics': slam_metrics,
+            'health_status': health_status
+        })
+
+        return health_status
+
+    def check_metric_thresholds(self, metrics: Dict) -> List[Dict]:
+        """Check metrics against alert thresholds"""
+        alerts = []
+
+        # Check tracking quality
+        if metrics.get('tracking_quality', 1.0) < self.alert_thresholds['tracking_quality']:
+            alerts.append({
+                'type': 'tracking_quality_low',
+                'severity': 'warning',
+                'value': metrics.get('tracking_quality'),
+                'threshold': self.alert_thresholds['tracking_quality']
+            })
+
+        # Check map accuracy
+        if metrics.get('position_accuracy', 0.0) > self.alert_thresholds['map_accuracy']:
+            alerts.append({
+                'type': 'map_accuracy_poor',
+                'severity': 'warning',
+                'value': metrics.get('position_accuracy'),
+                'threshold': self.alert_thresholds['map_accuracy']
+            })
+
+        # Check processing time
+        if metrics.get('mean_processing_time', 0.0) > self.alert_thresholds['processing_time']:
+            alerts.append({
+                'type': 'performance_degraded',
+                'severity': 'warning',
+                'value': metrics.get('mean_processing_time'),
+                'threshold': self.alert_thresholds['processing_time']
+            })
+
+        # Check feature count
+        if metrics.get('current_features', 100) < self.alert_thresholds['feature_count']:
+            alerts.append({
+                'type': 'feature_starvation',
+                'severity': 'warning',
+                'value': metrics.get('current_features'),
+                'threshold': self.alert_thresholds['feature_count']
+            })
+
+        return alerts
+
+    def calculate_overall_health(self, metrics: Dict, alerts: List[Dict]) -> float:
+        """Calculate overall SLAM health score (0-1 scale)"""
+
+        # Start with perfect health
+        health_score = 1.0
+
+        # Deduct for each alert
+        for alert in alerts:
+            if alert['severity'] == 'warning':
+                health_score -= 0.1
+            elif alert['severity'] == 'error':
+                health_score -= 0.3
+
+        # Additional deductions based on key metrics
+        tracking_quality = metrics.get('tracking_quality', 1.0)
+        health_score *= tracking_quality
+
+        processing_time = metrics.get('mean_processing_time', 0.0)
+        if processing_time > 0.1:  # 10 FPS
+            health_score *= 0.5
+        elif processing_time > 0.05:  # 20 FPS
+            health_score *= 0.8
+
+        return max(0.0, min(1.0, health_score))
+
+    def analyze_trends(self, current_metrics: Dict) -> Dict[str, float]:
+        """Analyze trends in SLAM performance over time"""
+
+        if len(self.monitoring_history) < 10:
+            return {'trend_analysis_pending': True}
+
+        # Calculate trends for key metrics
+        recent_metrics = self.monitoring_history[-10:]
+
+        trends = {}
+
+        # Analyze processing time trend
+        proc_times = [m['metrics'].get('mean_processing_time', 0) for m in recent_metrics]
+        if len(proc_times) > 1:
+            time_trend = (proc_times[-1] - proc_times[0]) / len(proc_times)
+            trends['processing_time_trend'] = time_trend
+
+        # Analyze tracking quality trend
+        track_qualities = [m['metrics'].get('tracking_quality', 1.0) for m in recent_metrics]
+        if len(track_qualities) > 1:
+            quality_trend = (track_qualities[-1] - track_qualities[0]) / len(track_qualities)
+            trends['tracking_quality_trend'] = quality_trend
+
+        # Analyze feature count trend
+        feature_counts = [m['metrics'].get('current_features', 100) for m in recent_metrics]
+        if len(feature_counts) > 1:
+            feature_trend = (feature_counts[-1] - feature_counts[0]) / len(feature_counts)
+            trends['feature_count_trend'] = feature_trend
+
+        return trends
+
+    def get_maintenance_recommendations(self, metrics: Dict) -> List[str]:
+        """Get maintenance recommendations based on current state"""
+        recommendations = []
+
+        # Based on current metrics, suggest maintenance actions
+        if metrics.get('tracking_quality', 1.0) < 0.7:
+            recommendations.append("Consider recalibrating sensors")
+
+        if metrics.get('mean_processing_time', 0.0) > 0.05:
+            recommendations.append("Review algorithm parameters for optimization")
+
+        if metrics.get('relocalization_count', 0) > 5:
+            recommendations.append("Investigate environmental factors causing relocalizations")
+
+        if metrics.get('loop_closure_success_rate', 1.0) < 0.8:
+            recommendations.append("Verify loop closure parameters and environment texture")
+
+        return recommendations
+
+    def get_health_summary(self) -> Dict[str, Any]:
+        """Get summary of current SLAM health status"""
+
+        if not self.monitoring_history:
+            return {'status': 'no_data', 'message': 'No monitoring data available'}
+
+        latest = self.monitoring_history[-1]
+
+        return {
+            'status': 'monitoring_active',
+            'timestamp': latest['timestamp'],
+            'overall_health_score': latest['health_status']['overall_health'],
+            'active_alerts': len(latest['health_status']['alerts']),
+            'diagnosed_issues': len(latest['health_status']['diagnosis']['issues_found']),
+            'last_update': time.time() - latest['timestamp']
+        }
+```
+
+## Summary
+
+Hardware-Accelerated Visual-Inertial SLAM represents a critical technology for enabling autonomous humanoid robots to navigate and understand their environment effectively. This chapter has covered comprehensive approaches to implementing SLAM systems optimized for NVIDIA's hardware platforms:
+
+### Key Techniques Covered:
+
+1. **NVIDIA Isaac SLAM Integration**: Leveraging Isaac Sim's sensor simulation and SLAM capabilities for humanoid robot applications.
+
+2. **Omniverse Replicator**: Generating synthetic training data with photorealistic quality to train robust SLAM systems that can handle diverse environments.
+
+3. **GPU Acceleration**: Utilizing CUDA cores and Tensor Cores for real-time feature detection, tracking, and optimization.
+
+4. **Neural SLAM**: Combining traditional geometric methods with deep learning for enhanced performance and robustness.
+
+5. **Humanoid-Specific Navigation**: Adapting SLAM for the unique challenges of bipedal robots, including height variations and human-aware navigation.
+
+6. **Performance Optimization**: Techniques for achieving real-time performance while maintaining accuracy.
+
+### Hardware Optimization:
+
+The chapter emphasized the importance of leveraging NVIDIA's specialized hardware for maximum performance, including:
+- GPU-accelerated feature detection and matching
+- Tensor Core optimization for neural components
+- Memory management for real-time processing
+- Mixed precision training for efficiency
+
+### Evaluation and Monitoring:
+
+Comprehensive benchmarking frameworks were presented to evaluate SLAM system performance across accuracy, efficiency, robustness, and real-time compliance metrics. Continuous health monitoring systems help maintain optimal performance and detect issues before they become critical.
+
+## Next Steps
+
+In the next chapter, we'll explore the integration of all these AI components into a cohesive AI-Robot Brain architecture, focusing on how to orchestrate perception, planning, control, and learning systems for humanoid robots. We'll cover system integration patterns, real-time scheduling, and how to create a unified cognitive architecture for humanoid robots.
+
+---
+
+**Estimated Reading Time**: 35 minutes

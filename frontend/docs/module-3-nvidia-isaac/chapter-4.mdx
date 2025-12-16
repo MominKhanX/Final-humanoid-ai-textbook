@@ -1,0 +1,3554 @@
+---
+title: "Sim-to-Real Transfer Techniques"
+description: "Advanced methods for bridging the reality gap between simulation and real-world robot performance in NVIDIA Isaac"
+sidebar_position: 4
+---
+
+# Sim-to-Real Transfer Techniques
+
+Welcome to Chapter 4 of Module 3: The AI-Robot Brain! In this chapter, we'll explore advanced methods for bridging the reality gap between simulation and real-world robot performance. Sim-to-real transfer is a critical challenge in humanoid robotics, where policies trained in simulation must perform effectively on physical robots despite differences in dynamics, sensor noise, and environmental conditions.
+
+## Learning Objectives
+
+By the end of this chapter, you will be able to:
+
+- Understand the reality gap problem and its impact on robotic systems
+- Implement domain randomization techniques for robust policy transfer
+- Apply system identification methods to characterize real robot dynamics
+- Use adaptive control strategies for sim-to-real deployment
+- Evaluate and validate policy performance across simulation and reality
+- Implement curriculum learning approaches for progressive skill transfer
+- Understand the role of hardware-in-the-loop testing in sim-to-real transfer
+
+## Understanding the Reality Gap
+
+### The Simulation-to-Reality Challenge
+
+The reality gap refers to the discrepancy between simulated environments and the real world, which can significantly impact the performance of policies trained in simulation. This gap manifests in several forms:
+
+1. **Dynamics Differences**: Friction, damping, and contact models may not perfectly match reality
+2. **Sensor Noise**: Simulated sensors often produce cleaner data than real sensors
+3. **Actuator Imperfections**: Motor delays, backlash, and control precision differences
+4. **Environmental Factors**: Lighting, surface textures, and external disturbances
+5. **Model Fidelity**: Simplified representations of complex real-world phenomena
+
+### Impact on Humanoid Robotics
+
+For humanoid robots, the reality gap is particularly challenging due to:
+
+- **Complex Contact Dynamics**: Walking, manipulation, and balance involve intricate contact physics
+- **High-Dimensional State Spaces**: Many degrees of freedom amplify modeling errors
+- **Stability Sensitivity**: Small modeling inaccuracies can lead to catastrophic failures
+- **Real-Time Constraints**: Control policies must respond quickly to maintain stability
+
+### Quantifying the Reality Gap
+
+```python
+import numpy as np
+from scipy.spatial.distance import euclidean
+from typing import Dict, List, Tuple
+
+class RealityGapAnalyzer:
+    """Analyzes and quantifies the reality gap between simulation and reality"""
+
+    def __init__(self):
+        self.sim_data = []
+        self.real_data = []
+        self.metrics = {}
+
+    def collect_trajectory_data(
+        self,
+        sim_trajectory: List[np.ndarray],
+        real_trajectory: List[np.ndarray]
+    ) -> Dict[str, float]:
+        """Collect and compare trajectory data from sim and real"""
+        if len(sim_trajectory) != len(real_trajectory):
+            raise ValueError("Trajectory lengths must match")
+
+        # Calculate trajectory similarity metrics
+        position_errors = []
+        velocity_errors = []
+
+        for s_state, r_state in zip(sim_trajectory, real_trajectory):
+            pos_error = euclidean(s_state[:3], r_state[:3])  # Position error
+            vel_error = euclidean(s_state[3:6], r_state[3:6])  # Velocity error
+
+            position_errors.append(pos_error)
+            velocity_errors.append(vel_error)
+
+        metrics = {
+            'mean_position_error': np.mean(position_errors),
+            'std_position_error': np.std(position_errors),
+            'mean_velocity_error': np.mean(velocity_errors),
+            'trajectory_similarity': 1.0 / (1.0 + np.mean(position_errors)),
+            'correlation_coefficient': np.corrcoef(
+                [state[0] for state in sim_trajectory],
+                [state[0] for state in real_trajectory]
+            )[0, 1]
+        }
+
+        return metrics
+
+    def compute_system_identification_metrics(
+        self,
+        sim_params: Dict,
+        real_params: Dict
+    ) -> Dict[str, float]:
+        """Compare system parameters between simulation and reality"""
+        metrics = {}
+
+        for param_name in sim_params.keys():
+            if param_name in real_params:
+                sim_val = sim_params[param_name]
+                real_val = real_params[param_name]
+
+                relative_error = abs(sim_val - real_val) / abs(real_val)
+                metrics[f'{param_name}_relative_error'] = relative_error
+
+        return metrics
+```
+
+## Domain Randomization Techniques
+
+### Concept and Motivation
+
+Domain randomization is a technique that randomizes simulation parameters during training to make policies robust to variations. Instead of learning to adapt to a single simulation environment, the policy learns to adapt to a wide range of possible environments, increasing the likelihood of successful transfer to reality.
+
+### Parameter Randomization Strategies
+
+```python
+import random
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
+
+@dataclass
+class DomainRandomizationParams:
+    """Parameters for domain randomization"""
+    # Physical properties
+    mass_range: Tuple[float, float] = (0.8, 1.2)  # Factor applied to masses
+    friction_range: Tuple[float, float] = (0.5, 2.0)  # Factor applied to friction
+    damping_range: Tuple[float, float] = (0.5, 2.0)  # Factor applied to damping
+    stiffness_range: Tuple[float, float] = (0.8, 1.2)  # Factor applied to stiffness
+
+    # Sensor noise
+    camera_noise_range: Tuple[float, float] = (0.0, 0.05)  # Gaussian noise std
+    imu_noise_range: Tuple[float, float] = (0.0, 0.02)  # IMU noise std
+    joint_noise_range: Tuple[float, float] = (0.0, 0.01)  # Joint position noise
+
+    # Actuator properties
+    actuator_delay_range: Tuple[float, float] = (0.0, 0.02)  # Actuator delay (s)
+    actuator_precision_range: Tuple[float, float] = (0.0, 0.05)  # Control precision
+
+class DomainRandomizer:
+    """Implements domain randomization for Isaac Sim"""
+
+    def __init__(self, params: DomainRandomizationParams):
+        self.params = params
+        self.episode_count = 0
+
+    def randomize_mass_properties(self, robot_path: str):
+        """Randomize mass properties of robot links"""
+        from omni.isaac.core.utils.prims import get_prim_at_path
+        from pxr import UsdPhysics
+
+        # Randomize mass for each link
+        for link_name in ['base_link', 'torso', 'left_arm', 'right_arm', 'left_leg', 'right_leg']:
+            link_path = f"{robot_path}/{link_name}"
+            link_prim = get_prim_at_path(link_path)
+
+            if link_prim.IsValid():
+                # Get original mass and apply randomization
+                original_mass = self.get_original_mass(link_path)
+                random_factor = random.uniform(*self.params.mass_range)
+                randomized_mass = original_mass * random_factor
+
+                mass_api = UsdPhysics.MassAPI.Apply(link_prim)
+                mass_api.CreateMassAttr(randomized_mass)
+
+    def randomize_friction_properties(self, robot_path: str):
+        """Randomize friction properties of robot contacts"""
+        from omni.isaac.core.utils.prims import get_prim_at_path
+        from pxr import UsdPhysics
+
+        # Randomize friction for each link
+        for link_name in ['left_foot', 'right_foot', 'left_hand', 'right_hand']:
+            link_path = f"{robot_path}/{link_name}"
+            link_prim = get_prim_at_path(link_path)
+
+            if link_prim.IsValid():
+                # Apply random friction coefficients
+                static_friction = random.uniform(0.5, 1.5)
+                dynamic_friction = random.uniform(0.3, 1.2)
+
+                friction_api = UsdPhysics.SurfaceAPI.Apply(link_prim)
+                friction_api.CreateUsdAttribute("physics:staticFriction", static_friction)
+                friction_api.CreateUsdAttribute("physics:dynamicFriction", dynamic_friction)
+
+    def randomize_sensor_noise(self, sensor_configs: Dict):
+        """Apply random noise to sensors"""
+        for sensor_name, config in sensor_configs.items():
+            # Add random noise parameters
+            noise_std = random.uniform(*self.params.camera_noise_range)
+            config['noise_std'] = noise_std
+
+    def get_original_mass(self, link_path: str) -> float:
+        """Get the original mass of a link (from initial config)"""
+        # This would typically load from the original URDF/USD
+        # For now, return a default value
+        return 10.0  # kg
+
+    def randomize_episode(self):
+        """Apply domain randomization for a new episode"""
+        self.randomize_mass_properties("/World/Robot")
+        self.randomize_friction_properties("/World/Robot")
+        self.episode_count += 1
+
+        return {
+            'episode': self.episode_count,
+            'mass_randomization_applied': True,
+            'friction_randomization_applied': True,
+            'sensor_noise_applied': True
+        }
+```
+
+### Advanced Domain Randomization with Isaac Lab
+
+```python
+import carb
+import omni
+from omni.isaac.core.utils.stage import get_current_stage
+from omni.isaac.core.utils.prims import get_prim_at_path
+from omni.isaac.core.objects import DynamicCuboid
+from omni.isaac.core.materials import PhysicsMaterial
+from omni.isaac.lab.assets import RigidObject
+from omni.isaac.lab.envs import ManagerBasedRLEnv
+from omni.isaac.lab.managers import CurriculumManager
+from omni.isaac.lab.scene import InteractiveScene
+from omni.isaac.lab.sensors import CameraCfg, ImuCcfg
+from omni.isaac.lab.sim import SimulationCfg
+from omni.isaac.lab.utils import configclass
+
+@configclass
+class DomainRandomizationSceneCfg:
+    """Configuration for domain randomization scene"""
+
+    # Simulation settings
+    simulation: SimulationCfg = SimulationCfg(
+        device="cuda:0",
+        use_gpu_pipeline=True,
+        gravity=(0.0, 0.0, -9.81),
+        dt=1.0 / 60.0,
+    )
+
+    # Scene settings
+    scene: InteractiveScene = InteractiveScene(
+        num_envs=4096,
+        env_spacing=2.5,
+        replicate_physics=True,
+    )
+
+    # Robot asset (would be configured based on your humanoid)
+    robot: RigidObject = RigidObject(
+        prim_path="{ENV_REGEX_NS}/Robot",
+        init_state=RigidObject.InitialStateCfg(
+            pos=(0.0, 0.0, 0.5),
+            rot=(1.0, 0.0, 0.0, 0.0),
+        ),
+        spawn=RigidObject.SpawnCfg(
+            mass_props=RigidObject.SpawnCfg.MassPropsCfg(mass=10.0),
+            rigid_props=RigidObject.SpawnCfg.RigidPropertiesCfg(
+                max_linear_velocity=1000.0,
+                max_angular_velocity=1000.0,
+                max_depenetration_velocity=1000.0,
+            ),
+            activate=True,
+        ),
+    )
+
+    # Sensors
+    camera: CameraCfg = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/Sensors/Camera",
+        update_period=0.1,
+        height=480,
+        width=640,
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 1000.0),
+        ),
+    )
+
+    imu: ImuCcfg = ImuCcfg(
+        prim_path="{ENV_REGEX_NS}/Robot/Sensors/IMU",
+        update_period=0.005,
+        offset=ImuCcfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+    )
+
+class AdvancedDomainRandomizer:
+    """Advanced domain randomization using Isaac Lab managers"""
+
+    def __init__(self, env: ManagerBasedRLEnv):
+        self.env = env
+        self.curriculum_manager = CurriculumManager()
+
+        # Define randomization ranges
+        self.randomization_ranges = {
+            'gravity': {'min': -9.81 * 1.1, 'max': -9.81 * 0.9},
+            'friction': {'min': 0.5, 'max': 1.5},
+            'mass_multiplier': {'min': 0.8, 'max': 1.2},
+            'actuator_gains': {'min': 0.9, 'max': 1.1},
+        }
+
+    def setup_randomization(self):
+        """Set up domain randomization managers"""
+        # Randomize simulation parameters
+        self.setup_simulation_randomization()
+
+        # Randomize robot properties
+        self.setup_robot_randomization()
+
+        # Randomize environment properties
+        self.setup_environment_randomization()
+
+    def setup_simulation_randomization(self):
+        """Randomize simulation-level parameters"""
+        # Randomize gravity
+        gravity_x = random.uniform(
+            self.randomization_ranges['gravity']['min'],
+            self.randomization_ranges['gravity']['max']
+        )
+        self.env.sim.cfg.gravity = (0.0, 0.0, gravity_x)
+
+    def setup_robot_randomization(self):
+        """Randomize robot-specific parameters"""
+        # Randomize masses
+        for i in range(self.env.num_envs):
+            mass_mult = random.uniform(
+                self.randomization_ranges['mass_multiplier']['min'],
+                self.randomization_ranges['mass_multiplier']['max']
+            )
+
+            # Apply mass multiplier to robot links
+            self.apply_mass_multiplier(i, mass_mult)
+
+        # Randomize actuator gains
+        self.randomize_actuator_gains()
+
+    def setup_environment_randomization(self):
+        """Randomize environment-specific parameters"""
+        # Randomize floor friction
+        for i in range(self.env.num_envs):
+            friction = random.uniform(
+                self.randomization_ranges['friction']['min'],
+                self.randomization_ranges['friction']['max']
+            )
+            self.set_floor_friction(i, friction)
+
+    def apply_mass_multiplier(self, env_idx: int, multiplier: float):
+        """Apply mass multiplier to robot in environment"""
+        # Get robot articulation in this environment
+        robot_articulation = self.env.scene["robot"]
+
+        # Apply to all bodies in the robot
+        for body_idx in range(len(robot_articulation.body_names)):
+            original_mass = robot_articulation.get_body_mass(env_idx, body_idx)
+            new_mass = original_mass * multiplier
+            robot_articulation.set_body_mass(env_idx, body_idx, new_mass)
+
+    def randomize_actuator_gains(self):
+        """Randomize actuator gains"""
+        robot_articulation = self.env.scene["robot"]
+
+        for joint_idx in range(len(robot_articulation.joint_names)):
+            gain_mult = random.uniform(
+                self.randomization_ranges['actuator_gains']['min'],
+                self.randomization_ranges['actuator_gains']['max']
+            )
+
+            # Apply gain multiplier to PD controllers
+            current_stiffness = robot_articulation.get_joint_stiffness(joint_idx)
+            current_damping = robot_articulation.get_joint_damping(joint_idx)
+
+            robot_articulation.set_joint_stiffness(joint_idx, current_stiffness * gain_mult)
+            robot_articulation.set_joint_damping(joint_idx, current_damping * gain_mult)
+
+    def set_floor_friction(self, env_idx: int, friction: float):
+        """Set floor friction for environment"""
+        # This would typically modify the ground plane material
+        pass
+```
+
+## System Identification for Real Robot Modeling
+
+### Identifying Real Robot Dynamics
+
+System identification involves characterizing the actual dynamics of a physical robot to improve simulation fidelity. This process helps bridge the reality gap by updating simulation parameters based on real-world measurements.
+
+```python
+import numpy as np
+from scipy.optimize import minimize
+from scipy.integrate import odeint
+from typing import Callable, Dict, List, Tuple
+import matplotlib.pyplot as plt
+
+class SystemIdentifier:
+    """System identification for humanoid robot dynamics"""
+
+    def __init__(self):
+        self.model_parameters = {}
+        self.identification_data = []
+
+    def collect_excitation_data(
+        self,
+        robot_controller,
+        excitation_signals: List[np.ndarray]
+    ) -> Dict[str, np.ndarray]:
+        """Collect data using designed excitation signals"""
+        input_data = []
+        output_data = []
+
+        for signal in excitation_signals:
+            # Apply excitation signal to robot
+            robot_response = robot_controller.apply_signal(signal)
+
+            input_data.append(signal)
+            output_data.append(robot_response)
+
+        return {
+            'inputs': np.array(input_data),
+            'outputs': np.array(output_data)
+        }
+
+    def linear_system_model(
+        self,
+        state: np.ndarray,
+        t: float,
+        inputs: np.ndarray,
+        params: Dict
+    ) -> np.ndarray:
+        """Linear state-space model of robot dynamics"""
+        # State vector: [position, velocity, acceleration]
+        # This is a simplified example - real humanoid would be much more complex
+        A = params['A_matrix']  # State matrix
+        B = params['B_matrix']  # Input matrix
+        C = params['C_matrix']  # Output matrix
+
+        dxdt = A @ state + B @ inputs
+        return dxdt
+
+    def nonlinear_system_model(
+        self,
+        state: np.ndarray,
+        t: float,
+        inputs: np.ndarray,
+        params: Dict
+    ) -> np.ndarray:
+        """Nonlinear model for complex humanoid dynamics"""
+        # Unpack state (simplified for example)
+        q = state[:6]  # Joint positions (for 6-DOF example)
+        dq = state[6:12]  # Joint velocities
+
+        # Mass matrix M(q)
+        M = self.mass_matrix(q, params)
+
+        # Coriolis and centrifugal forces C(q, dq)
+        C = self.coriolis_matrix(q, dq, params)
+
+        # Gravity forces g(q)
+        g = self.gravity_vector(q, params)
+
+        # Friction forces F(dq)
+        F = self.friction_vector(dq, params)
+
+        # Apply equation: M(q)*ddq + C(q,dq)*dq + g(q) + F(dq) = tau
+        tau = inputs  # Joint torques
+
+        ddq = np.linalg.solve(M, tau - C @ dq - g - F)
+
+        return np.concatenate([dq, ddq])
+
+    def mass_matrix(self, q: np.ndarray, params: Dict) -> np.ndarray:
+        """Compute mass matrix for robot"""
+        # Simplified mass matrix calculation
+        # In practice, this would use recursive Newton-Euler or Lagrangian methods
+        n = len(q)
+        M = np.eye(n) * params.get('base_mass', 1.0)
+
+        # Add coupling terms based on joint configuration
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    M[i, j] = params.get(f'coupling_{i}_{j}', 0.1) * np.cos(q[i] - q[j])
+
+        return M
+
+    def coriolis_matrix(self, q: np.ndarray, dq: np.ndarray, params: Dict) -> np.ndarray:
+        """Compute Coriolis and centrifugal matrix"""
+        n = len(q)
+        C = np.zeros((n, n))
+
+        # Simplified Coriolis computation
+        for i in range(n):
+            for j in range(n):
+                for k in range(n):
+                    # Christoffel symbols of the first kind
+                    Gamma = self.christoffel_symbol(i, j, k, q, params)
+                    C[i, j] += Gamma * dq[k]
+
+        return C
+
+    def gravity_vector(self, q: np.ndarray, params: Dict) -> np.ndarray:
+        """Compute gravity vector"""
+        g = params.get('gravity', 9.81)
+        n = len(q)
+        grav = np.zeros(n)
+
+        # Simplified gravity effects
+        for i in range(n):
+            grav[i] = params.get(f'link_{i}_mass', 1.0) * g * np.sin(q[i])
+
+        return grav
+
+    def friction_vector(self, dq: np.ndarray, params: Dict) -> np.ndarray:
+        """Compute friction vector"""
+        n = len(dq)
+        F = np.zeros(n)
+
+        for i in range(n):
+            # Viscous and Coulomb friction
+            viscous = params.get(f'viscous_friction_{i}', 0.1) * dq[i]
+            coulomb = params.get(f'coulomb_friction_{i}', 0.05) * np.sign(dq[i])
+            F[i] = viscous + coulomb
+
+        return F
+
+    def christoffel_symbol(self, i: int, j: int, k: int, q: np.ndarray, params: Dict) -> float:
+        """Compute Christoffel symbol of the first kind"""
+        # Simplified calculation - in reality this would be computed from the mass matrix
+        return params.get(f'christoffel_{i}_{j}_{k}', 0.01)
+
+    def identify_parameters(
+        self,
+        measured_data: Dict[str, np.ndarray],
+        initial_guess: Dict
+    ) -> Dict:
+        """Identify model parameters using optimization"""
+
+        def objective_function(params_array):
+            # Convert array back to dict
+            params = self.array_to_params(params_array, initial_guess)
+
+            total_error = 0.0
+
+            for input_seq, output_seq in zip(measured_data['inputs'], measured_data['outputs']):
+                # Simulate the model with current parameters
+                simulated_output = self.simulate_model(input_seq, params)
+
+                # Calculate error between measured and simulated
+                error = np.sum((output_seq - simulated_output) ** 2)
+                total_error += error
+
+            return total_error
+
+        # Convert initial guess to array
+        initial_array = self.params_to_array(initial_guess)
+
+        # Optimize parameters
+        result = minimize(objective_function, initial_array, method='BFGS')
+
+        # Convert back to parameter dict
+        optimized_params = self.array_to_params(result.x, initial_guess)
+
+        return optimized_params
+
+    def params_to_array(self, params: Dict) -> np.ndarray:
+        """Convert parameter dictionary to array for optimization"""
+        values = []
+        for key in sorted(params.keys()):
+            values.append(params[key])
+        return np.array(values)
+
+    def array_to_params(self, array: np.ndarray, template: Dict) -> Dict:
+        """Convert array back to parameter dictionary"""
+        params = {}
+        keys = sorted(template.keys())
+        for i, key in enumerate(keys):
+            params[key] = array[i]
+        return params
+
+    def simulate_model(self, inputs: np.ndarray, params: Dict) -> np.ndarray:
+        """Simulate the robot model with given inputs and parameters"""
+        # Initial state
+        state = np.zeros(12)  # 6 positions + 6 velocities (simplified)
+
+        # Time vector
+        dt = 0.01  # 100 Hz
+        t = np.arange(0, len(inputs) * dt, dt)
+
+        # Store results
+        outputs = []
+
+        for i in range(len(inputs)):
+            # Apply system model
+            derivatives = self.nonlinear_system_model(state, t[i], inputs[i], params)
+
+            # Integrate
+            state = state + derivatives * dt
+            outputs.append(state.copy())
+
+        return np.array(outputs)
+```
+
+### Practical System Identification Workflow
+
+```python
+class PracticalSystemId:
+    """Practical system identification workflow for real robots"""
+
+    def __init__(self, robot_interface):
+        self.robot = robot_interface
+        self.identifier = SystemIdentifier()
+        self.data_collector = DataCollector()
+
+    def run_identification_workflow(self):
+        """Complete system identification workflow"""
+
+        # Step 1: Design excitation signals
+        excitation_signals = self.design_excitation_signals()
+
+        # Step 2: Collect data from real robot
+        print("Collecting data from real robot...")
+        real_data = self.collect_real_data(excitation_signals)
+
+        # Step 3: Preprocess data
+        print("Preprocessing data...")
+        clean_data = self.preprocess_data(real_data)
+
+        # Step 4: Identify parameters
+        print("Identifying parameters...")
+        initial_params = self.get_initial_parameters()
+        identified_params = self.identifier.identify_parameters(clean_data, initial_params)
+
+        # Step 5: Validate model
+        print("Validating model...")
+        validation_results = self.validate_model(identified_params)
+
+        # Step 6: Update simulation
+        print("Updating simulation parameters...")
+        self.update_simulation_parameters(identified_params)
+
+        return {
+            'identified_params': identified_params,
+            'validation_results': validation_results,
+            'data_used': len(clean_data['inputs'])
+        }
+
+    def design_excitation_signals(self) -> List[np.ndarray]:
+        """Design informative excitation signals"""
+        signals = []
+
+        # Multi-sine signals for each joint
+        for joint_idx in range(6):  # Example: 6 joints
+            # Generate multi-sine signal with multiple frequencies
+            t = np.linspace(0, 10, 1000)  # 10 seconds, 100 Hz
+            signal = np.zeros(len(t))
+
+            # Add multiple sine waves at different frequencies
+            frequencies = [0.5, 1.0, 2.0, 3.0]  # Hz
+            amplitudes = [0.5, 0.3, 0.2, 0.1]  # Amplitude
+
+            for freq, amp in zip(frequencies, amplitudes):
+                signal += amp * np.sin(2 * np.pi * freq * t)
+
+            # Add some random noise for persistence of excitation
+            signal += 0.05 * np.random.randn(len(t))
+
+            signals.append(signal)
+
+        return signals
+
+    def collect_real_data(self, excitation_signals: List[np.ndarray]) -> Dict:
+        """Collect data from real robot"""
+        inputs = []
+        outputs = []
+
+        for signal in excitation_signals:
+            # Send signal to robot and record response
+            robot_response = self.robot.apply_torque_profile(signal)
+
+            inputs.append(signal)
+            outputs.append(robot_response)
+
+        return {'inputs': inputs, 'outputs': outputs}
+
+    def preprocess_data(self, raw_data: Dict) -> Dict:
+        """Preprocess raw data for identification"""
+        # Filter data to remove noise
+        filtered_inputs = [self.low_pass_filter(signal) for signal in raw_data['inputs']]
+        filtered_outputs = [self.low_pass_filter(signal) for signal in raw_data['outputs']]
+
+        # Remove steady-state bias
+        detrended_inputs = [self.remove_bias(signal) for signal in filtered_inputs]
+        detrended_outputs = [self.remove_bias(signal) for signal in filtered_outputs]
+
+        return {
+            'inputs': detrended_inputs,
+            'outputs': detrended_outputs
+        }
+
+    def low_pass_filter(self, signal: np.ndarray, cutoff_freq: float = 10.0) -> np.ndarray:
+        """Apply low-pass filter to remove high-frequency noise"""
+        from scipy.signal import butter, filtfilt
+
+        nyquist = 50.0  # Assuming 100 Hz sampling
+        normal_cutoff = cutoff_freq / nyquist
+
+        b, a = butter(4, normal_cutoff, btype='low', analog=False)
+        filtered = filtfilt(b, a, signal)
+
+        return filtered
+
+    def remove_bias(self, signal: np.ndarray) -> np.ndarray:
+        """Remove DC bias from signal"""
+        return signal - np.mean(signal)
+
+    def get_initial_parameters(self) -> Dict:
+        """Get initial parameter estimates"""
+        return {
+            'base_mass': 50.0,  # kg
+            'gravity': 9.81,
+            'viscous_friction_0': 0.1,
+            'viscous_friction_1': 0.1,
+            'viscous_friction_2': 0.1,
+            'coulomb_friction_0': 0.05,
+            'coulomb_friction_1': 0.05,
+            'coulomb_friction_2': 0.05,
+            'link_0_mass': 5.0,
+            'link_1_mass': 3.0,
+            'link_2_mass': 2.0,
+        }
+
+    def validate_model(self, params: Dict) -> Dict:
+        """Validate identified model against validation data"""
+        # Create validation data (different from identification data)
+        validation_signals = self.design_validation_signals()
+        real_validation = self.collect_real_data(validation_signals)
+        clean_validation = self.preprocess_data(real_validation)
+
+        # Predict using identified model
+        predictions = []
+        for input_sig in clean_validation['inputs']:
+            pred = self.identifier.simulate_model(input_sig, params)
+            predictions.append(pred)
+
+        # Calculate validation metrics
+        errors = []
+        for true, pred in zip(clean_validation['outputs'], predictions):
+            mse = np.mean((true - pred) ** 2)
+            errors.append(mse)
+
+        return {
+            'mse': np.mean(errors),
+            'rmse': np.sqrt(np.mean(errors)),
+            'max_error': np.max(errors),
+            'validation_signals_used': len(validation_signals)
+        }
+
+    def update_simulation_parameters(self, params: Dict):
+        """Update Isaac Sim with identified parameters"""
+        # This would update the USD files or simulation parameters
+        print(f"Updating simulation with identified parameters: {params}")
+
+        # Example: Update robot mass in Isaac Sim
+        from omni.isaac.core.utils.prims import get_prim_at_path
+        from pxr import UsdPhysics
+
+        robot_prim = get_prim_at_path("/World/Robot")
+        if robot_prim:
+            mass_api = UsdPhysics.MassAPI.Apply(robot_prim)
+            mass_api.CreateMassAttr(params['base_mass'])
+
+        print("Simulation parameters updated successfully!")
+
+    def design_validation_signals(self) -> List[np.ndarray]:
+        """Design validation signals (different from identification signals)"""
+        # Use different frequencies/amplitudes for validation
+        signals = []
+
+        for joint_idx in range(6):
+            t = np.linspace(0, 5, 500)  # Shorter validation signals
+            signal = 0.3 * np.sin(2 * np.pi * 1.5 * t)  # Different frequency
+
+            signals.append(signal)
+
+        return signals
+
+class DataCollector:
+    """Helper class for collecting robot data"""
+
+    def __init__(self):
+        self.collected_data = []
+
+    def collect_joint_states(self, robot_interface, duration: float, freq: float = 100.0):
+        """Collect joint position, velocity, and effort data"""
+        dt = 1.0 / freq
+        num_samples = int(duration / dt)
+
+        joint_positions = []
+        joint_velocities = []
+        joint_efforts = []
+
+        for i in range(num_samples):
+            # Get current state from robot
+            pos, vel, effort = robot_interface.get_joint_states()
+
+            joint_positions.append(pos.copy())
+            joint_velocities.append(vel.copy())
+            joint_efforts.append(effort.copy())
+
+            # Sleep for timing
+            time.sleep(dt)
+
+        return {
+            'positions': np.array(joint_positions),
+            'velocities': np.array(joint_velocities),
+            'efforts': np.array(joint_efforts),
+            'timestamps': np.arange(0, duration, dt)
+        }
+```
+
+## Adaptive Control Strategies
+
+### Adaptive Control Framework
+
+Adaptive control adjusts controller parameters in real-time to compensate for uncertainties and changes in the system. This is crucial for sim-to-real transfer where model mismatches exist.
+
+```python
+import torch
+import torch.nn as nn
+import numpy as np
+from typing import Dict, Tuple, Optional
+
+class AdaptiveController:
+    """Adaptive controller for sim-to-real transfer"""
+
+    def __init__(self, num_joints: int, learning_rate: float = 0.01):
+        self.num_joints = num_joints
+        self.learning_rate = learning_rate
+
+        # Initialize adaptive parameters
+        self.feedback_gains = torch.ones(num_joints, dtype=torch.float32) * 100.0
+        self.feedforward_gains = torch.ones(num_joints, dtype=torch.float32) * 1.0
+        self.adaptive_weights = torch.zeros(num_joints, 10, dtype=torch.float32)  # 10 basis functions
+
+        # Tracking errors
+        self.position_errors = torch.zeros(num_joints)
+        self.velocity_errors = torch.zeros(num_joints)
+        self.integral_errors = torch.zeros(num_joints)
+
+    def compute_control(
+        self,
+        desired_pos: torch.Tensor,
+        desired_vel: torch.Tensor,
+        desired_acc: torch.Tensor,
+        current_pos: torch.Tensor,
+        current_vel: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute adaptive control torque"""
+
+        # Calculate errors
+        pos_error = desired_pos - current_pos
+        vel_error = desired_vel - current_vel
+
+        # Update integral of errors
+        self.integral_errors += pos_error * 0.01  # dt = 0.01s
+
+        # PID-like control with adaptive gains
+        proportional_term = self.feedback_gains * pos_error
+        derivative_term = self.feedback_gains * 0.1 * vel_error  # D gain = P gain * 0.1
+        integral_term = self.feedback_gains * 0.01 * self.integral_errors
+
+        # Feedforward term (simplified)
+        feedforward_term = self.feedforward_gains * desired_acc
+
+        # Adaptive compensation using neural network approximation
+        adaptive_compensation = self.compute_adaptive_compensation(
+            pos_error, vel_error, current_pos, current_vel
+        )
+
+        # Total control
+        control_torque = (
+            proportional_term +
+            derivative_term +
+            integral_term +
+            feedforward_term +
+            adaptive_compensation
+        )
+
+        # Update adaptive parameters based on error
+        self.update_adaptive_parameters(pos_error, vel_error)
+
+        return control_torque
+
+    def compute_adaptive_compensation(
+        self,
+        pos_error: torch.Tensor,
+        vel_error: torch.Tensor,
+        pos: torch.Tensor,
+        vel: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute adaptive compensation using basis function approximation"""
+
+        # Create basis functions (Radial Basis Functions)
+        basis_functions = self.create_basis_functions(pos, vel)
+
+        # Compute compensation as weighted sum of basis functions
+        compensation = torch.matmul(self.adaptive_weights.t(), basis_functions.unsqueeze(1)).squeeze()
+
+        return compensation
+
+    def create_basis_functions(self, pos: torch.Tensor, vel: torch.Tensor) -> torch.Tensor:
+        """Create radial basis functions for approximation"""
+        num_bases = self.adaptive_weights.shape[1]
+        basis_functions = torch.zeros(num_bases)
+
+        # Centers for RBFs (learned or predefined)
+        centers = torch.linspace(-np.pi, np.pi, num_bases // 2)
+        vel_centers = torch.linspace(-5.0, 5.0, num_bases // 2)
+
+        # Position-related basis functions
+        for i in range(num_bases // 2):
+            basis_functions[i] = torch.exp(-0.5 * ((pos[0] - centers[i]) / 0.5) ** 2)
+
+        # Velocity-related basis functions
+        for i in range(num_bases // 2):
+            idx = i + num_bases // 2
+            basis_functions[idx] = torch.exp(-0.5 * ((vel[0] - vel_centers[i]) / 1.0) ** 2)
+
+        return basis_functions
+
+    def update_adaptive_parameters(
+        self,
+        pos_error: torch.Tensor,
+        vel_error: torch.Tensor
+    ):
+        """Update adaptive parameters based on tracking error"""
+
+        # Update feedback gains using gradient descent on position error
+        gain_gradients = pos_error * pos_error  # Simplified gradient
+        self.feedback_gains -= self.learning_rate * gain_gradients
+
+        # Clamp gains to reasonable bounds
+        self.feedback_gains = torch.clamp(self.feedback_gains, 1.0, 1000.0)
+
+        # Update adaptive weights based on basis function activation
+        current_bases = self.create_basis_functions(
+            torch.zeros_like(pos_error),
+            torch.zeros_like(vel_error)
+        )
+
+        # Gradient descent on approximation error (assuming we have reference model)
+        approximation_error = pos_error  # Simplified - in reality this would come from reference model
+        weight_gradients = torch.outer(approximation_error, current_bases)
+
+        self.adaptive_weights -= self.learning_rate * 0.01 * weight_gradients
+
+class ModelReferenceAdaptiveController(AdaptiveController):
+    """Model Reference Adaptive Controller (MRAC)"""
+
+    def __init__(
+        self,
+        num_joints: int,
+        reference_model_params: Dict,
+        learning_rate: float = 0.01
+    ):
+        super().__init__(num_joints, learning_rate)
+
+        # Reference model parameters
+        self.ref_nat_freq = reference_model_params.get('natural_frequency', 10.0)
+        self.ref_damping = reference_model_params.get('damping_ratio', 0.7)
+
+        # Adaptive parameters for control law
+        self.theta_r = torch.ones(num_joints)  # Reference model adaptation
+        self.theta_y = torch.ones(num_joints)  # Output adaptation
+
+    def compute_reference_model_response(
+        self,
+        desired_input: torch.Tensor,
+        current_ref_state: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute reference model response"""
+        # Second-order reference model: s^2 + 2*zeta*wn*s + wn^2
+        wn = self.ref_nat_freq * self.theta_r
+        zeta = self.ref_damping
+
+        # State space representation
+        A = torch.tensor([
+            [0.0, 1.0],
+            [-wn**2, -2*zeta*wn]
+        ])
+
+        B = torch.tensor([[0.0], [wn**2]])
+
+        # Update reference model state
+        state_derivative = A @ current_ref_state + B * desired_input
+        new_ref_state = current_ref_state + state_derivative * 0.01  # dt = 0.01s
+
+        # Output is position (first state)
+        ref_output = new_ref_state[0]
+        ref_velocity = new_ref_state[1]
+
+        return ref_output, ref_velocity
+
+    def compute_mrac_control(
+        self,
+        desired_pos: torch.Tensor,
+        current_pos: torch.Tensor,
+        current_vel: torch.Tensor,
+        reference_state: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute MRAC control law"""
+
+        # Get reference model response
+        ref_pos, ref_vel = self.compute_reference_model_response(desired_pos, reference_state)
+
+        # Tracking errors
+        y_error = current_pos - ref_pos
+        ydot_error = current_vel - ref_vel
+
+        # Adaptation laws
+        self.update_mrac_parameters(y_error, ydot_error, current_pos, current_vel)
+
+        # MRAC control law
+        control_law = (
+            self.theta_r * (ref_pos - current_pos) +
+            self.theta_y * (ref_vel - current_vel) +
+            self.compute_compensation(current_pos, current_vel)
+        )
+
+        return control_law
+
+    def update_mrac_parameters(
+        self,
+        y_error: torch.Tensor,
+        ydot_error: torch.Tensor,
+        pos: torch.Tensor,
+        vel: torch.Tensor
+    ):
+        """Update MRAC adaptation parameters"""
+
+        # Adaptation rates
+        gamma_r = 0.01
+        gamma_y = 0.01
+
+        # Update reference adaptation (theta_r)
+        self.theta_r -= gamma_r * y_error * pos
+
+        # Update output adaptation (theta_y)
+        self.theta_y -= gamma_y * ydot_error * vel
+
+        # Clamp parameters to reasonable bounds
+        self.theta_r = torch.clamp(self.theta_r, 0.1, 10.0)
+        self.theta_y = torch.clamp(self.theta_y, 0.1, 10.0)
+
+    def compute_compensation(self, pos: torch.Tensor, vel: torch.Tensor) -> torch.Tensor:
+        """Compute additional compensation terms"""
+        # Gravity compensation (approximate)
+        gravity_comp = 9.81 * torch.sin(pos) * 0.1
+
+        # Friction compensation (approximate)
+        friction_comp = torch.sign(vel) * 0.05 + vel * 0.1
+
+        return gravity_comp + friction_comp
+```
+
+### Online Learning for Sim-to-Real Adaptation
+
+```python
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+
+class OnlineLearningAdapter:
+    """Online learning system for continuous sim-to-real adaptation"""
+
+    def __init__(self, state_dim: int, action_dim: int, learning_rate: float = 0.001):
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+
+        # Neural network for policy adjustment
+        self.policy_network = self.build_policy_network()
+        self.optimizer = optim.Adam(self.policy_network.parameters(), lr=learning_rate)
+        self.criterion = nn.MSELoss()
+
+        # Buffer for recent experiences
+        self.buffer_size = 1000
+        self.experience_buffer = {
+            'states': [],
+            'actions': [],
+            'next_states': [],
+            'rewards': [],
+            'errors': []
+        }
+
+        # Performance monitoring
+        self.performance_history = []
+        self.adaptation_threshold = 0.1  # Threshold for triggering adaptation
+
+    def build_policy_network(self):
+        """Build neural network for policy adjustment"""
+        return nn.Sequential(
+            nn.Linear(self.state_dim + self.action_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, self.action_dim),  # Output adjustment
+            nn.Tanh()  # Normalize output
+        )
+
+    def predict_action_adjustment(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """Predict how to adjust the action based on current state"""
+        # Concatenate state and action
+        input_tensor = torch.cat([state, action], dim=-1)
+
+        # Get adjustment prediction
+        adjustment = self.policy_network(input_tensor)
+
+        return adjustment
+
+    def update_with_experience(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        next_state: torch.Tensor,
+        reward: float,
+        predicted_next_state: torch.Tensor
+    ):
+        """Update the online learning system with new experience"""
+
+        # Calculate prediction error
+        state_error = torch.norm(next_state - predicted_next_state)
+
+        # Store experience
+        self.store_experience(state, action, next_state, reward, state_error.item())
+
+        # Trigger adaptation if error is significant
+        if state_error > self.adaptation_threshold:
+            self.adapt_policy()
+
+        # Update performance metrics
+        self.performance_history.append({
+            'state_error': state_error.item(),
+            'reward': reward,
+            'timestamp': time.time()
+        })
+
+    def store_experience(
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        next_state: torch.Tensor,
+        reward: float,
+        error: float
+    ):
+        """Store experience in buffer"""
+        self.experience_buffer['states'].append(state.clone())
+        self.experience_buffer['actions'].append(action.clone())
+        self.experience_buffer['next_states'].append(next_state.clone())
+        self.experience_buffer['rewards'].append(reward)
+        self.experience_buffer['errors'].append(error)
+
+        # Keep buffer size limited
+        if len(self.experience_buffer['states']) > self.buffer_size:
+            for key in self.experience_buffer.keys():
+                self.experience_buffer[key] = self.experience_buffer[key][-self.buffer_size:]
+
+    def adapt_policy(self):
+        """Perform online adaptation using recent experiences"""
+        if len(self.experience_buffer['states']) < 10:  # Need minimum samples
+            return
+
+        # Convert to tensors
+        states = torch.stack(self.experience_buffer['states'])
+        actions = torch.stack(self.experience_buffer['actions'])
+        next_states = torch.stack(self.experience_buffer['next_states'])
+        errors = torch.tensor(self.experience_buffer['errors']).unsqueeze(1)
+
+        # Create dataset
+        dataset = TensorDataset(states, actions, next_states, errors)
+        dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+        # Train for one epoch
+        self.policy_network.train()
+        total_loss = 0.0
+
+        for batch_states, batch_actions, batch_next_states, batch_errors in dataloader:
+            # Predict adjustments
+            input_tensor = torch.cat([batch_states, batch_actions], dim=1)
+            predicted_adjustments = self.policy_network(input_tensor)
+
+            # Use errors as targets for adjustment learning
+            loss = self.criterion(predicted_adjustments, batch_errors.expand_as(predicted_adjustments))
+
+            # Backpropagate
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            total_loss += loss.item()
+
+        print(f"Policy adapted. Average loss: {total_loss / len(dataloader):.4f}")
+
+    def should_trigger_adaptation(self) -> bool:
+        """Check if adaptation should be triggered"""
+        if len(self.performance_history) < 5:
+            return False
+
+        # Check if recent errors are above threshold
+        recent_errors = [p['state_error'] for p in self.performance_history[-5:]]
+        avg_error = sum(recent_errors) / len(recent_errors)
+
+        return avg_error > self.adaptation_threshold
+
+    def get_adapted_action(
+        self,
+        base_action: torch.Tensor,
+        state: torch.Tensor
+    ) -> torch.Tensor:
+        """Get action adjusted by online learning"""
+        with torch.no_grad():
+            adjustment = self.predict_action_adjustment(state, base_action)
+            adapted_action = base_action + adjustment
+
+        return adapted_action
+
+class Sim2RealAdapterManager:
+    """Manager for coordinating sim-to-real adaptation strategies"""
+
+    def __init__(self, robot_interface):
+        self.robot = robot_interface
+        self.adaptive_controller = AdaptiveController(num_joints=12)  # Example: 12 joints
+        self.online_learner = OnlineLearningAdapter(state_dim=24, action_dim=12)  # 12 pos + 12 vel, 12 actions
+        self.system_identifier = SystemIdentifier()
+
+        self.sim_params = {}  # Current simulation parameters
+        self.real_params = {}  # Identified real robot parameters
+        self.adaptation_active = True
+
+    def coordinate_adaptation(
+        self,
+        sim_action: torch.Tensor,
+        real_state: torch.Tensor,
+        desired_state: torch.Tensor
+    ) -> torch.Tensor:
+        """Coordinate different adaptation strategies"""
+
+        if not self.adaptation_active:
+            return sim_action
+
+        # Step 1: Apply adaptive control adjustment
+        adaptive_adjustment = self.adaptive_controller.compute_control(
+            desired_state[:12],  # Desired positions
+            desired_state[12:],  # Desired velocities (simplified)
+            torch.zeros(12),     # Desired accelerations
+            real_state[:12],     # Current positions
+            real_state[12:]      # Current velocities
+        )
+
+        # Step 2: Apply online learning adjustment
+        learned_adjustment = self.online_learner.get_adapted_action(
+            sim_action,
+            real_state
+        )
+
+        # Combine adjustments (weighted combination)
+        combined_action = 0.6 * sim_action + 0.3 * adaptive_adjustment + 0.1 * learned_adjustment
+
+        # Ensure action stays within safe limits
+        combined_action = torch.clamp(combined_action, -100.0, 100.0)  # Torque limits
+
+        return combined_action
+
+    def update_from_real_world(self, real_data: Dict):
+        """Update adaptation systems with real-world data"""
+
+        # Update online learner
+        state = torch.tensor(real_data['state'], dtype=torch.float32)
+        action = torch.tensor(real_data['action'], dtype=torch.float32)
+        next_state = torch.tensor(real_data['next_state'], dtype=torch.float32)
+        reward = real_data['reward']
+        predicted_next_state = torch.tensor(real_data['predicted_next_state'], dtype=torch.float32)
+
+        self.online_learner.update_with_experience(
+            state, action, next_state, reward, predicted_next_state
+        )
+
+        # Potentially trigger system identification update
+        if self.should_update_model():
+            self.trigger_system_identification()
+
+    def should_update_model(self) -> bool:
+        """Check if system model should be updated"""
+        # Update if we have enough diverse data
+        return len(self.online_learner.performance_history) > 100
+
+    def trigger_system_identification(self):
+        """Trigger system identification with collected data"""
+        print("Triggering system identification...")
+
+        # Collect recent data for identification
+        recent_data = self.get_recent_performance_data()
+
+        # Perform system identification
+        new_params = self.system_identifier.identify_parameters(
+            recent_data,
+            self.real_params
+        )
+
+        # Update parameters
+        self.real_params = new_params
+
+        # Update simulation if needed
+        if self.should_update_simulation(new_params):
+            self.update_simulation_with_new_params(new_params)
+
+    def get_recent_performance_data(self) -> Dict:
+        """Get recent performance data for system identification"""
+        # This would collect data from the online learner's experience buffer
+        return {
+            'inputs': [torch.randn(12) for _ in range(50)],  # Placeholder
+            'outputs': [torch.randn(12) for _ in range(50)]  # Placeholder
+        }
+
+    def should_update_simulation(self, new_params: Dict) -> bool:
+        """Check if simulation should be updated with new parameters"""
+        # Update if parameters changed significantly
+        if not self.sim_params:
+            return True
+
+        param_change = sum(abs(new_params.get(k, 0) - self.sim_params.get(k, 0))
+                          for k in new_params.keys()) / len(new_params)
+
+        return param_change > 0.1  # 10% threshold
+
+    def update_simulation_with_new_params(self, params: Dict):
+        """Update simulation with new identified parameters"""
+        self.sim_params = params
+        print(f"Updated simulation parameters: {params}")
+
+        # This would update the Isaac Sim environment
+        # Implementation would depend on specific simulation setup
+```
+
+## Curriculum Learning for Progressive Transfer
+
+### Curriculum Design for Humanoid Skills
+
+Curriculum learning gradually increases task difficulty, allowing policies to learn simpler skills before tackling complex ones. This approach is particularly effective for sim-to-real transfer as it builds robust foundational behaviors.
+
+```python
+from enum import Enum
+from dataclasses import dataclass
+from typing import List, Dict, Any, Callable
+import numpy as np
+
+class SkillLevel(Enum):
+    """Skill levels for curriculum learning"""
+    FOUNDATION = 1    # Basic movements, balance
+    INTERMEDIATE = 2  # Coordinated actions
+    ADVANCED = 3      # Complex behaviors
+    EXPERT = 4       # Human-level skills
+
+@dataclass
+class CurriculumStage:
+    """Definition of a curriculum stage"""
+    name: str
+    skill_level: SkillLevel
+    tasks: List[str]
+    success_threshold: float  # Minimum success rate to advance
+    max_episodes: int        # Maximum episodes to achieve threshold
+    environment_modifiers: Dict[str, Any]  # Changes to simulation
+    evaluation_criteria: List[str]  # How to measure success
+
+class CurriculumManager:
+    """Manages curriculum learning for sim-to-real transfer"""
+
+    def __init__(self):
+        self.stages = self.define_curriculum()
+        self.current_stage = 0
+        self.stage_performance = {}
+        self.progression_history = []
+
+    def define_curriculum(self) -> List[CurriculumStage]:
+        """Define the curriculum stages for humanoid learning"""
+        return [
+            # Foundation Level: Basic balance and movement
+            CurriculumStage(
+                name="Static Balance",
+                skill_level=SkillLevel.FOUNDATION,
+                tasks=["maintain_upright_posture", "recover_from_small_pushes"],
+                success_threshold=0.8,
+                max_episodes=1000,
+                environment_modifiers={
+                    "gravity": 9.81,
+                    "friction": 1.0,
+                    "actuator_precision": 0.001,
+                    "sensor_noise": 0.001
+                },
+                evaluation_criteria=[
+                    "center_of_mass_stability",
+                    "joint_limit_compliance",
+                    "energy_efficiency"
+                ]
+            ),
+            CurriculumStage(
+                name="Dynamic Balance",
+                skill_level=SkillLevel.FOUNDATION,
+                tasks=["step_in_place", "weight_shifting"],
+                success_threshold=0.75,
+                max_episodes=1500,
+                environment_modifiers={
+                    "gravity": 9.81,
+                    "friction": 0.8,
+                    "actuator_precision": 0.002,
+                    "sensor_noise": 0.002
+                },
+                evaluation_criteria=[
+                    "balance_recovery_time",
+                    "step_accuracy",
+                    "postural_sway"
+                ]
+            ),
+            CurriculumStage(
+                name="Simple Locomotion",
+                skill_level=SkillLevel.INTERMEDIATE,
+                tasks=["forward_stepping", "turning", "backwards_stepping"],
+                success_threshold=0.7,
+                max_episodes=2000,
+                environment_modifiers={
+                    "gravity": 9.81,
+                    "friction": 0.7,
+                    "actuator_precision": 0.003,
+                    "sensor_noise": 0.003
+                },
+                evaluation_criteria=[
+                    "walking_speed",
+                    "stability_margin",
+                    "energy_efficiency"
+                ]
+            ),
+            CurriculumStage(
+                name="Complex Locomotion",
+                skill_level=SkillLevel.INTERMEDIATE,
+                tasks=["variable_speed_walking", "obstacle_navigation"],
+                success_threshold=0.65,
+                max_episodes=2500,
+                environment_modifiers={
+                    "gravity": 9.81,
+                    "friction": 0.6,
+                    "actuator_precision": 0.004,
+                    "sensor_noise": 0.004,
+                    "terrain_variety": 0.3
+                },
+                evaluation_criteria=[
+                    "navigation_success",
+                    "adaptability",
+                    "robustness"
+                ]
+            ),
+            CurriculumStage(
+                name="Advanced Manipulation",
+                skill_level=SkillLevel.ADVANCED,
+                tasks=["object_grasping", "tool_use", "bimanual_coordination"],
+                success_threshold=0.6,
+                max_episodes=3000,
+                environment_modifiers={
+                    "gravity": 9.81,
+                    "friction": 0.5,
+                    "actuator_precision": 0.005,
+                    "sensor_noise": 0.005,
+                    "object_variety": 0.4,
+                    "disturbance_frequency": 0.1
+                },
+                evaluation_criteria=[
+                    "manipulation_success",
+                    "precision",
+                    "adaptability"
+                ]
+            ),
+            CurriculumStage(
+                name="Human-Level Behaviors",
+                skill_level=SkillLevel.EXPERT,
+                tasks=["complex_task_execution", "social_interaction", "problem_solving"],
+                success_threshold=0.55,
+                max_episodes=5000,
+                environment_modifiers={
+                    "gravity": 9.81,
+                    "friction": 0.4,
+                    "actuator_precision": 0.006,
+                    "sensor_noise": 0.006,
+                    "environment_complexity": 0.7,
+                    "social_context": 0.5
+                },
+                evaluation_criteria=[
+                    "task_completion",
+                    "human_likeness",
+                    "adaptability"
+                ]
+            )
+        ]
+
+    def evaluate_stage_performance(self, stage_idx: int, agent) -> float:
+        """Evaluate agent performance on current stage"""
+        stage = self.stages[stage_idx]
+
+        # Run evaluation episodes
+        successes = 0
+        total_episodes = min(100, stage.max_episodes)  # Limit evaluation runs
+
+        for episode in range(total_episodes):
+            # Modify environment based on stage requirements
+            self.modify_environment(stage.environment_modifiers)
+
+            # Run episode and check success
+            episode_success = self.run_evaluation_episode(agent, stage.tasks)
+            if episode_success:
+                successes += 1
+
+        success_rate = successes / total_episodes
+        return success_rate
+
+    def modify_environment(self, modifiers: Dict[str, Any]):
+        """Modify simulation environment based on curriculum stage"""
+        # This would interface with Isaac Sim to change environment parameters
+        print(f"Modifying environment with: {modifiers}")
+
+        # Example modifications:
+        # - Change friction coefficients
+        # - Adjust actuator noise levels
+        # - Modify terrain properties
+        # - Add disturbance forces
+        pass
+
+    def run_evaluation_episode(self, agent, tasks: List[str]) -> bool:
+        """Run a single evaluation episode"""
+        # This would run the agent in simulation and evaluate success
+        # For now, return random success based on task complexity
+        import random
+        return random.random() > 0.3  # 70% success rate for example
+
+    def advance_curriculum(self, agent) -> bool:
+        """Advance to next curriculum stage if conditions are met"""
+        if self.current_stage >= len(self.stages) - 1:
+            print("Curriculum completed!")
+            return False
+
+        # Evaluate current stage performance
+        current_performance = self.evaluate_stage_performance(self.current_stage, agent)
+        current_stage = self.stages[self.current_stage]
+
+        print(f"Stage '{current_stage.name}' performance: {current_performance:.2f}")
+
+        # Check if threshold is met
+        if current_performance >= current_stage.success_threshold:
+            # Advance to next stage
+            self.current_stage += 1
+            self.stage_performance[self.current_stage - 1] = current_performance
+
+            print(f"Advancing to stage: {self.stages[self.current_stage].name}")
+            self.progression_history.append({
+                'stage_completed': self.current_stage - 1,
+                'performance': current_performance,
+                'date': time.time()
+            })
+
+            return True
+        else:
+            print(f"Stage not completed. Required: {current_stage.success_threshold}, Achieved: {current_performance}")
+            return False
+
+    def get_current_tasks(self) -> List[str]:
+        """Get tasks for current curriculum stage"""
+        return self.stages[self.current_stage].tasks
+
+    def get_environment_config(self) -> Dict[str, Any]:
+        """Get current environment configuration"""
+        return self.stages[self.current_stage].environment_modifiers
+
+    def get_progress_report(self) -> Dict[str, Any]:
+        """Get curriculum progress report"""
+        return {
+            'current_stage': self.stages[self.current_stage].name,
+            'current_level': self.stages[self.current_stage].skill_level.name,
+            'completed_stages': len(self.stage_performance),
+            'total_stages': len(self.stages),
+            'performance_by_stage': self.stage_performance,
+            'progress_history': self.progression_history
+        }
+
+class ProgressiveTransferCurriculum(CurriculumManager):
+    """Curriculum specifically designed for progressive sim-to-real transfer"""
+
+    def __init__(self):
+        super().__init__()
+        self.transfer_readiness_scores = {}
+        self.domain_randomization_levels = {}
+
+    def define_transfer_curriculum(self) -> List[CurriculumStage]:
+        """Define curriculum stages with increasing sim-to-real gap"""
+        stages = []
+
+        # Stage 1: Perfect simulation (no gap)
+        stages.append(CurriculumStage(
+            name="Perfect Simulation",
+            skill_level=SkillLevel.FOUNDATION,
+            tasks=["basic_balance", "simple_movement"],
+            success_threshold=0.9,
+            max_episodes=500,
+            environment_modifiers={
+                "domain_randomization": 0.0,
+                "sim_noise": 0.0,
+                "realism_gap": 0.0
+            },
+            evaluation_criteria=["tracking_error", "stability"]
+        ))
+
+        # Stage 2: Low realism gap
+        stages.append(CurriculumStage(
+            name="Low Realism Gap",
+            skill_level=SkillLevel.FOUNDATION,
+            tasks=["basic_locomotion"],
+            success_threshold=0.85,
+            max_episodes=800,
+            environment_modifiers={
+                "domain_randomization": 0.2,
+                "sim_noise": 0.01,
+                "realism_gap": 0.2,
+                "actuator_delay": 0.01
+            },
+            evaluation_criteria=["locomotion_stability", "energy_efficiency"]
+        ))
+
+        # Stage 3: Medium realism gap
+        stages.append(CurriculumStage(
+            name="Medium Realism Gap",
+            skill_level=SkillLevel.INTERMEDIATE,
+            tasks=["complex_locomotion"],
+            success_threshold=0.8,
+            max_episodes=1200,
+            environment_modifiers={
+                "domain_randomization": 0.4,
+                "sim_noise": 0.02,
+                "realism_gap": 0.4,
+                "actuator_delay": 0.02,
+                "sensor_delay": 0.01
+            },
+            evaluation_criteria=["navigation_success", "robustness"]
+        ))
+
+        # Stage 4: High realism gap (接近 real conditions)
+        stages.append(CurriculumStage(
+            name="High Realism Gap",
+            skill_level=SkillLevel.ADVANCED,
+            tasks=["realistic_behavior"],
+            success_threshold=0.75,
+            max_episodes=2000,
+            environment_modifiers={
+                "domain_randomization": 0.6,
+                "sim_noise": 0.03,
+                "realism_gap": 0.6,
+                "actuator_delay": 0.03,
+                "sensor_delay": 0.02,
+                "external_disturbances": 0.1
+            },
+            evaluation_criteria=["transfer_success", "adaptability"]
+        ))
+
+        # Stage 5: Real robot deployment preparation
+        stages.append(CurriculumStage(
+            name="Real Robot Ready",
+            skill_level=SkillLevel.EXPERT,
+            tasks=["safe_real_world_behavior"],
+            success_threshold=0.7,
+            max_episodes=3000,
+            environment_modifiers={
+                "domain_randomization": 0.8,
+                "sim_noise": 0.05,
+                "realism_gap": 0.8,
+                "actuator_delay": 0.05,
+                "sensor_delay": 0.03,
+                "external_disturbances": 0.2,
+                "safety_constraints": 0.9
+            },
+            evaluation_criteria=["safety_compliance", "real_world_success"]
+        ))
+
+        return stages
+
+    def assess_transfer_readiness(self, agent, stage_idx: int) -> float:
+        """Assess how ready the agent is for real-world transfer"""
+        stage = self.stages[stage_idx]
+
+        # Evaluate multiple readiness factors
+        stability_score = self.evaluate_stability(agent)
+        robustness_score = self.evaluate_robustness(agent)
+        adaptability_score = self.evaluate_adaptability(agent)
+
+        # Weighted average
+        readiness_score = (
+            0.4 * stability_score +
+            0.4 * robustness_score +
+            0.2 * adaptability_score
+        )
+
+        self.transfer_readiness_scores[stage_idx] = readiness_score
+        return readiness_score
+
+    def evaluate_stability(self, agent) -> float:
+        """Evaluate behavioral stability"""
+        # Run multiple trials and measure consistency
+        trials = 50
+        success_count = 0
+
+        for _ in range(trials):
+            trial_success = self.run_stability_trial(agent)
+            if trial_success:
+                success_count += 1
+
+        return success_count / trials
+
+    def evaluate_robustness(self, agent) -> float:
+        """Evaluate robustness to perturbations"""
+        # Apply various disturbances and measure recovery
+        disturbances = [
+            "push_force",
+            "sensor_noise",
+            "actuator_delay",
+            "terrain_variation"
+        ]
+
+        robust_score = 0
+        for dist in disturbances:
+            score = self.apply_disturbance_and_measure_recovery(agent, dist)
+            robust_score += score
+
+        return robust_score / len(disturbances)
+
+    def evaluate_adaptability(self, agent) -> float:
+        """Evaluate ability to adapt to new conditions"""
+        # Test adaptation to unseen conditions
+        new_conditions = [
+            "different_friction",
+            "changed_mass_distribution",
+            "altered_geometry"
+        ]
+
+        adapt_score = 0
+        for condition in new_conditions:
+            score = self.test_condition_adaptation(agent, condition)
+            adapt_score += score
+
+        return adapt_score / len(new_conditions)
+
+    def run_stability_trial(self, agent) -> bool:
+        """Run a single stability trial"""
+        # For now, return a random result
+        import random
+        return random.random() > 0.2  # 80% success rate
+
+    def apply_disturbance_and_measure_recovery(self, agent, disturbance_type: str) -> float:
+        """Apply disturbance and measure recovery capability"""
+        # For now, return a random result
+        import random
+        return random.random()
+
+    def test_condition_adaptation(self, agent, condition_type: str) -> float:
+        """Test adaptation to new condition"""
+        # For now, return a random result
+        import random
+        return random.random()
+
+    def prepare_for_real_world(self, agent):
+        """Prepare agent for real-world deployment"""
+        print("Preparing agent for real-world deployment...")
+
+        # Final safety checks
+        safety_score = self.perform_safety_assessment(agent)
+
+        # Final calibration
+        calibration_data = self.calibrate_for_real_robot(agent)
+
+        # Emergency procedures setup
+        emergency_procedures = self.setup_emergency_behaviors(agent)
+
+        return {
+            'safety_score': safety_score,
+            'calibration_complete': True,
+            'emergency_procedures_ready': True,
+            'ready_for_deployment': safety_score > 0.9
+        }
+
+    def perform_safety_assessment(self, agent) -> float:
+        """Perform comprehensive safety assessment"""
+        # Check safety constraints are satisfied
+        safety_checks = [
+            self.check_joint_limits(agent),
+            self.check_force_limits(agent),
+            self.check_stability_bounds(agent),
+            self.check_collision_avoidance(agent)
+        ]
+
+        passed_checks = sum(safety_checks)
+        total_checks = len(safety_checks)
+
+        return passed_checks / total_checks if total_checks > 0 else 0.0
+
+    def check_joint_limits(self, agent) -> bool:
+        """Check if joint limits are respected"""
+        return True  # Placeholder
+
+    def check_force_limits(self, agent) -> bool:
+        """Check if force/torque limits are respected"""
+        return True  # Placeholder
+
+    def check_stability_bounds(self, agent) -> bool:
+        """Check if stability bounds are maintained"""
+        return True  # Placeholder
+
+    def check_collision_avoidance(self, agent) -> bool:
+        """Check if collision avoidance works"""
+        return True  # Placeholder
+
+    def calibrate_for_real_robot(self, agent):
+        """Calibrate agent for specific real robot"""
+        # This would involve parameter tuning for the specific robot
+        return {"calibration_factors": [1.0] * 12}  # Example: 12 joints
+
+    def setup_emergency_behaviors(self, agent):
+        """Setup emergency behaviors for safety"""
+        emergency_behaviors = {
+            'fall_protection': self.create_fall_protection_behavior(agent),
+            'overheat_protection': self.create_overheat_protection_behavior(agent),
+            'collision_response': self.create_collision_response_behavior(agent)
+        }
+
+        return emergency_behaviors
+
+    def create_fall_protection_behavior(self, agent):
+        """Create behavior to protect robot during falls"""
+        return "roll_protect_sequence"
+
+    def create_overheat_protection_behavior(self, agent):
+        """Create behavior to prevent motor overheating"""
+        return "cool_down_sequence"
+
+    def create_collision_response_behavior(self, agent):
+        """Create behavior for collision response"""
+        return "safe_retraction_sequence"
+```
+
+## Hardware-in-the-Loop Testing
+
+### HIL Testing Framework
+
+Hardware-in-the-Loop (HIL) testing combines real hardware components with simulated environments, providing a middle ground between pure simulation and full real-world deployment. This approach is valuable for validating sim-to-real transfer strategies.
+
+```python
+import threading
+import queue
+import time
+from abc import ABC, abstractmethod
+
+class HardwareInLoopTester:
+    """Framework for Hardware-in-the-Loop testing"""
+
+    def __init__(self, robot_interface, simulation_interface):
+        self.robot = robot_interface
+        self.sim = simulation_interface
+        self.data_queue = queue.Queue()
+        self.running = False
+        self.test_results = []
+
+        # Timing synchronization
+        self.sim_time = 0.0
+        self.real_time = 0.0
+        self.time_scaling = 1.0  # Real-time factor
+
+    def start_hil_test(self, test_duration: float = 60.0):
+        """Start Hardware-in-the-Loop test"""
+        self.running = True
+
+        # Start simulation thread
+        sim_thread = threading.Thread(target=self._simulation_loop, args=(test_duration,))
+        sim_thread.start()
+
+        # Start hardware interface thread
+        hw_thread = threading.Thread(target=self._hardware_loop, args=(test_duration,))
+        hw_thread.start()
+
+        # Start data collection thread
+        data_thread = threading.Thread(target=self._data_collection_loop, args=(test_duration,))
+        data_thread.start()
+
+        # Wait for all threads to complete
+        sim_thread.join()
+        hw_thread.join()
+        data_thread.join()
+
+        return self.analyze_results()
+
+    def _simulation_loop(self, duration: float):
+        """Main simulation loop"""
+        start_time = time.time()
+
+        while self.running and (time.time() - start_time) < duration:
+            # Step simulation
+            self.sim.step_simulation()
+
+            # Get simulation state
+            sim_state = self.sim.get_robot_state()
+
+            # Send to hardware (through queue)
+            self.data_queue.put(('sim_state', sim_state, time.time()))
+
+            # Control timing
+            time.sleep(0.01 / self.time_scaling)  # 100Hz simulation
+            self.sim_time += 0.01
+
+    def _hardware_loop(self, duration: float):
+        """Main hardware interface loop"""
+        start_time = time.time()
+
+        while self.running and (time.time() - start_time) < duration:
+            # Get commands from simulation
+            try:
+                cmd = self.data_queue.get(timeout=0.1)
+                if cmd[0] == 'control_cmd':
+                    # Send command to real hardware
+                    self.robot.send_command(cmd[1])
+            except queue.Empty:
+                pass
+
+            # Get real hardware state
+            real_state = self.robot.get_state()
+
+            # Send to simulation
+            self.data_queue.put(('real_state', real_state, time.time()))
+
+            # Control timing
+            time.sleep(0.01)  # 100Hz hardware loop
+            self.real_time += 0.01
+
+    def _data_collection_loop(self, duration: float):
+        """Data collection and synchronization loop"""
+        start_time = time.time()
+
+        while self.running and (time.time() - start_time) < duration:
+            try:
+                # Collect data from queue
+                while not self.data_queue.empty():
+                    data_type, data, timestamp = self.data_queue.get_nowait()
+
+                    if data_type == 'sim_state':
+                        self._process_sim_state(data, timestamp)
+                    elif data_type == 'real_state':
+                        self._process_real_state(data, timestamp)
+
+            except queue.Empty:
+                pass
+
+            time.sleep(0.001)  # Fast collection loop
+
+    def _process_sim_state(self, state, timestamp):
+        """Process simulation state data"""
+        # Store for comparison with real state
+        pass
+
+    def _process_real_state(self, state, timestamp):
+        """Process real hardware state data"""
+        # Store for comparison with simulation state
+        pass
+
+    def analyze_results(self) -> Dict:
+        """Analyze HIL test results"""
+        # Calculate synchronization errors
+        sync_errors = self.calculate_synchronization_errors()
+
+        # Calculate performance metrics
+        performance_metrics = self.calculate_performance_metrics()
+
+        # Assess sim-to-real gap
+        gap_assessment = self.assess_sim_to_real_gap()
+
+        results = {
+            'synchronization_quality': sync_errors,
+            'performance_metrics': performance_metrics,
+            'sim_to_real_gap': gap_assessment,
+            'test_duration': self.real_time,
+            'warnings': self.get_warnings()
+        }
+
+        return results
+
+    def calculate_synchronization_errors(self) -> Dict:
+        """Calculate timing and state synchronization errors"""
+        return {
+            'timing_drift': 0.01,  # seconds
+            'state_deviation': 0.05,  # normalized
+            'communication_latency': 0.002  # seconds
+        }
+
+    def calculate_performance_metrics(self) -> Dict:
+        """Calculate performance metrics"""
+        return {
+            'real_time_factor': self.time_scaling,
+            'control_stability': 0.95,
+            'response_accuracy': 0.92
+        }
+
+    def assess_sim_to_real_gap(self) -> Dict:
+        """Assess the sim-to-real gap observed in HIL testing"""
+        return {
+            'behavior_similarity': 0.85,
+            'parameter_mismatch': 0.15,
+            'recommendation': 'Increase domain randomization'
+        }
+
+    def get_warnings(self) -> List[str]:
+        """Get warnings from HIL testing"""
+        warnings = []
+
+        if self.time_scaling < 0.5:
+            warnings.append("Significant timing mismatch detected")
+        if self.assess_sim_to_real_gap()['behavior_similarity'] < 0.8:
+            warnings.append("Large behavior gap between sim and real")
+
+        return warnings
+
+class HILTestScenario:
+    """Specific test scenarios for HIL testing"""
+
+    def __init__(self, hil_tester: HardwareInLoopTester):
+        self.hil = hil_tester
+
+    def test_balance_stability(self, duration: float = 30.0) -> Dict:
+        """Test balance stability in HIL environment"""
+        print("Testing balance stability...")
+
+        # Configure robot to maintain balance
+        self.hil.robot.set_control_mode('balance')
+
+        # Add small disturbances in simulation
+        self.hil.sim.add_disturbances(['small_push', 'surface_vibration'])
+
+        # Run HIL test
+        results = self.hil.start_hil_test(duration)
+
+        return results
+
+    def test_locomotion_transfer(self, duration: float = 60.0) -> Dict:
+        """Test locomotion skill transfer"""
+        print("Testing locomotion transfer...")
+
+        # Load locomotion policy
+        self.hil.robot.load_policy('walking_policy')
+
+        # Set up varied terrain in simulation
+        self.hil.sim.setup_terrain(['flat', 'uneven', 'inclined'])
+
+        # Run extended HIL test
+        results = self.hil.start_hil_test(duration)
+
+        return results
+
+    def test_manipulation_skills(self, duration: float = 45.0) -> Dict:
+        """Test manipulation skill transfer"""
+        print("Testing manipulation skills...")
+
+        # Set up manipulation task
+        self.hil.robot.set_control_mode('manipulation')
+        self.hil.sim.setup_objects(['cube', 'cylinder', 'sphere'])
+
+        # Run manipulation HIL test
+        results = self.hil.start_hil_test(duration)
+
+        return results
+
+    def test_disturbance_robustness(self, duration: float = 40.0) -> Dict:
+        """Test robustness to disturbances"""
+        print("Testing disturbance robustness...")
+
+        # Configure for disturbance testing
+        self.hil.sim.enable_disturbances(True)
+        self.hil.sim.set_disturbance_frequency(0.5)  # Hz
+
+        # Run robustness test
+        results = self.hil.start_hil_test(duration)
+
+        return results
+
+class HILValidationFramework:
+    """Comprehensive validation framework for sim-to-real transfer"""
+
+    def __init__(self, robot_interface, simulation_interface):
+        self.hil_tester = HardwareInLoopTester(robot_interface, simulation_interface)
+        self.scenarios = HILTestScenario(self.hil_tester)
+        self.validation_results = []
+
+    def run_comprehensive_validation(self) -> Dict:
+        """Run comprehensive validation suite"""
+        print("Starting comprehensive HIL validation...")
+
+        # Run all test scenarios
+        tests = [
+            ('balance_stability', self.scenarios.test_balance_stability),
+            ('locomotion_transfer', self.scenarios.test_locomotion_transfer),
+            ('manipulation_skills', self.scenarios.test_manipulation_skills),
+            ('disturbance_robustness', self.scenarios.test_disturbance_robustness)
+        ]
+
+        results = {}
+
+        for test_name, test_func in tests:
+            print(f"Running {test_name} test...")
+            result = test_func()
+            results[test_name] = result
+            self.validation_results.append((test_name, result))
+
+        # Generate overall assessment
+        overall_assessment = self.generate_overall_assessment(results)
+
+        return {
+            'individual_test_results': results,
+            'overall_assessment': overall_assessment,
+            'transfer_readiness_score': self.calculate_transfer_readiness(results),
+            'recommendations': self.generate_recommendations(results)
+        }
+
+    def generate_overall_assessment(self, test_results: Dict) -> Dict:
+        """Generate overall assessment from test results"""
+        assessments = []
+
+        for test_name, result in test_results.items():
+            if result['sim_to_real_gap']['behavior_similarity'] > 0.8:
+                assessment = f"{test_name}: GOOD - Minimal sim-to-real gap"
+            elif result['sim_to_real_gap']['behavior_similarity'] > 0.6:
+                assessment = f"{test_name}: FAIR - Moderate gap, requires tuning"
+            else:
+                assessment = f"{test_name}: POOR - Large gap, needs retraining"
+
+            assessments.append(assessment)
+
+        return {
+            'summary': assessments,
+            'average_similarity': np.mean([
+                result['sim_to_real_gap']['behavior_similarity']
+                for result in test_results.values()
+            ])
+        }
+
+    def calculate_transfer_readiness(self, test_results: Dict) -> float:
+        """Calculate overall transfer readiness score"""
+        scores = []
+
+        for result in test_results.values():
+            # Weight different aspects
+            stability_weight = 0.3
+            robustness_weight = 0.4
+            similarity_weight = 0.3
+
+            stability_score = result['performance_metrics']['control_stability']
+            robustness_score = result['performance_metrics']['response_accuracy']
+            similarity_score = result['sim_to_real_gap']['behavior_similarity']
+
+            weighted_score = (
+                stability_weight * stability_score +
+                robustness_weight * robustness_score +
+                similarity_weight * similarity_score
+            )
+
+            scores.append(weighted_score)
+
+        return sum(scores) / len(scores)
+
+    def generate_recommendations(self, test_results: Dict) -> List[str]:
+        """Generate recommendations based on test results"""
+        recommendations = []
+
+        avg_similarity = np.mean([
+            result['sim_to_real_gap']['behavior_similarity']
+            for result in test_results.values()
+        ])
+
+        if avg_similarity < 0.7:
+            recommendations.append("Significant domain randomization needed")
+            recommendations.append("Consider system identification for model refinement")
+            recommendations.append("Implement adaptive control strategies")
+        elif avg_similarity < 0.85:
+            recommendations.append("Moderate domain randomization recommended")
+            recommendations.append("Fine-tune control parameters based on HIL results")
+        else:
+            recommendations.append("Good transfer readiness, proceed with caution")
+            recommendations.append("Monitor performance during initial real-world deployment")
+
+        # Add test-specific recommendations
+        for test_name, result in test_results.items():
+            if result['sim_to_real_gap']['behavior_similarity'] < 0.7:
+                recommendations.append(f"For {test_name}: Focus on improving this specific skill in simulation")
+
+        return recommendations
+```
+
+## Evaluation and Validation Metrics
+
+### Quantitative Assessment Framework
+
+Evaluating sim-to-real transfer requires comprehensive metrics that assess both the quality of transfer and the performance of the resulting real-world system.
+
+```python
+from sklearn.metrics import mean_squared_error, r2_score
+from scipy.spatial.distance import euclidean
+import statistics
+
+class TransferEvaluator:
+    """Framework for evaluating sim-to-real transfer"""
+
+    def __init__(self):
+        self.metrics = {}
+        self.baseline_performance = {}
+
+    def evaluate_transfer_performance(
+        self,
+        sim_trajectories: List[np.ndarray],
+        real_trajectories: List[np.ndarray]
+    ) -> Dict[str, float]:
+        """Evaluate transfer performance using multiple metrics"""
+
+        if len(sim_trajectories) != len(real_trajectories):
+            raise ValueError("Simulation and real trajectories must have same length")
+
+        # Calculate trajectory similarity metrics
+        similarity_metrics = self.calculate_trajectory_similarity(sim_trajectories, real_trajectories)
+
+        # Calculate control performance metrics
+        control_metrics = self.calculate_control_metrics(sim_trajectories, real_trajectories)
+
+        # Calculate stability metrics
+        stability_metrics = self.calculate_stability_metrics(real_trajectories)
+
+        # Calculate efficiency metrics
+        efficiency_metrics = self.calculate_efficiency_metrics(real_trajectories)
+
+        # Overall transfer score
+        transfer_score = self.calculate_transfer_score(
+            similarity_metrics, control_metrics, stability_metrics, efficiency_metrics
+        )
+
+        results = {
+            'trajectory_similarity': similarity_metrics,
+            'control_performance': control_metrics,
+            'stability_metrics': stability_metrics,
+            'efficiency_metrics': efficiency_metrics,
+            'transfer_score': transfer_score,
+            'success_rate': self.calculate_success_rate(real_trajectories)
+        }
+
+        return results
+
+    def calculate_trajectory_similarity(
+        self,
+        sim_traj: List[np.ndarray],
+        real_traj: List[np.ndarray]
+    ) -> Dict[str, float]:
+        """Calculate similarity between simulation and real trajectories"""
+
+        # Flatten trajectories for comparison
+        sim_flat = np.concatenate(sim_traj)
+        real_flat = np.concatenate(real_traj)
+
+        if len(sim_flat) != len(real_flat):
+            # Interpolate to same length
+            min_len = min(len(sim_flat), len(real_flat))
+            sim_flat = sim_flat[:min_len]
+            real_flat = real_flat[:min_len]
+
+        # MSE between trajectories
+        mse = mean_squared_error(sim_flat, real_flat)
+
+        # RMSE
+        rmse = np.sqrt(mse)
+
+        # R² score (coefficient of determination)
+        r2 = r2_score(sim_flat, real_flat)
+
+        # Dynamic Time Warping distance (if trajectories are time-series)
+        try:
+            from dtaidistance import dtw
+            dtw_distance = dtw.distance(sim_flat, real_flat)
+        except ImportError:
+            dtw_distance = float('inf')  # Use infinity if DTW not available
+
+        # Euclidean distance between end points
+        euclidean_dist = euclidean(sim_flat[-len(sim_flat)//10:], real_flat[-len(real_flat)//10:])
+
+        return {
+            'mse': mse,
+            'rmse': rmse,
+            'r2_score': r2,
+            'dtw_distance': dtw_distance,
+            'endpoint_distance': euclidean_dist,
+            'normalized_similarity': 1.0 / (1.0 + rmse)  # Higher is better
+        }
+
+    def calculate_control_metrics(
+        self,
+        sim_traj: List[np.ndarray],
+        real_traj: List[np.ndarray]
+    ) -> Dict[str, float]:
+        """Calculate control-specific performance metrics"""
+
+        # Control effort comparison
+        sim_control_effort = self.calculate_control_effort(sim_traj)
+        real_control_effort = self.calculate_control_effort(real_traj)
+
+        # Smoothness comparison
+        sim_smoothness = self.calculate_smoothness(sim_traj)
+        real_smoothness = self.calculate_smoothness(real_traj)
+
+        # Tracking accuracy
+        tracking_errors = []
+        for s, r in zip(sim_traj, real_traj):
+            error = np.mean(np.abs(s - r))
+            tracking_errors.append(error)
+
+        return {
+            'control_effort_similarity': 1.0 - abs(sim_control_effort - real_control_effort) / max(sim_control_effort, real_control_effort, 1e-6),
+            'smoothness_similarity': 1.0 - abs(sim_smoothness - real_smoothness) / max(sim_smoothness, real_smoothness, 1e-6),
+            'mean_tracking_error': np.mean(tracking_errors),
+            'tracking_error_std': np.std(tracking_errors)
+        }
+
+    def calculate_control_effort(self, trajectory: List[np.ndarray]) -> float:
+        """Calculate integrated control effort"""
+        if len(trajectory) < 2:
+            return 0.0
+
+        effort = 0.0
+        for i in range(1, len(trajectory)):
+            # Approximate control effort as change in state
+            delta = np.linalg.norm(trajectory[i] - trajectory[i-1])
+            effort += delta
+
+        return effort / len(trajectory)
+
+    def calculate_smoothness(self, trajectory: List[np.ndarray]) -> float:
+        """Calculate trajectory smoothness (inverse of jerk)"""
+        if len(trajectory) < 3:
+            return 0.0
+
+        jerk_sum = 0.0
+        for i in range(2, len(trajectory)):
+            # Calculate jerk (third derivative approximation)
+            prev_vel = trajectory[i-1] - trajectory[i-2]
+            curr_vel = trajectory[i] - trajectory[i-1]
+            acceleration = curr_vel - prev_vel
+            jerk = np.linalg.norm(acceleration)
+            jerk_sum += jerk
+
+        # Lower jerk = higher smoothness
+        mean_jerk = jerk_sum / (len(trajectory) - 2)
+        return 1.0 / (1.0 + mean_jerk)
+
+    def calculate_stability_metrics(self, real_trajectories: List[np.ndarray]) -> Dict[str, float]:
+        """Calculate stability metrics for real robot"""
+
+        # Stability based on variance of critical states (e.g., COM, joint angles)
+        stability_measures = []
+
+        for traj in real_trajectories:
+            # Calculate variance of key stability indicators
+            # For humanoid, this might be COM position, joint angles, etc.
+            if len(traj) > 1:
+                stability_variance = np.var(traj, axis=0)
+                stability_measures.append(np.mean(stability_variance))
+
+        if stability_measures:
+            avg_stability = np.mean(stability_measures)
+            stability_score = 1.0 / (1.0 + avg_stability)  # Lower variance = higher stability
+        else:
+            stability_score = 0.0
+
+        # Balance maintenance (time spent within stability bounds)
+        balance_time = self.calculate_balance_time(real_trajectories)
+
+        return {
+            'stability_score': stability_score,
+            'balance_maintenance': balance_time,
+            'variance_ema': self.calculate_exponential_moving_average_variance(real_trajectories)
+        }
+
+    def calculate_balance_time(self, trajectories: List[np.ndarray]) -> float:
+        """Calculate fraction of time spent in balanced state"""
+        total_time = 0
+        balanced_time = 0
+
+        for traj in trajectories:
+            for state in traj:
+                if self.is_balanced(state):
+                    balanced_time += 1
+                total_time += 1
+
+        return balanced_time / total_time if total_time > 0 else 0.0
+
+    def is_balanced(self, state: np.ndarray) -> bool:
+        """Check if robot state is balanced (simplified)"""
+        # This would check COM position relative to support polygon, joint angles, etc.
+        # For now, use a simple heuristic
+        return True  # Placeholder
+
+    def calculate_exponential_moving_average_variance(self, trajectories: List[np.ndarray]) -> float:
+        """Calculate exponentially weighted variance for stability assessment"""
+        all_states = np.concatenate(trajectories)
+
+        if len(all_states) < 2:
+            return 0.0
+
+        # Calculate EMA of variance
+        alpha = 0.1  # Smoothing factor
+        ema_var = 0.0
+
+        for i in range(1, len(all_states)):
+            current_var = np.var(all_states[:i+1])
+            if i == 1:
+                ema_var = current_var
+            else:
+                ema_var = alpha * current_var + (1 - alpha) * ema_var
+
+        return ema_var
+
+    def calculate_efficiency_metrics(self, real_trajectories: List[np.ndarray]) -> Dict[str, float]:
+        """Calculate energy and computational efficiency metrics"""
+
+        # Energy consumption (estimated from joint torques and velocities)
+        energy_consumption = self.estimate_energy_consumption(real_trajectories)
+
+        # Computational efficiency (time to compute control actions)
+        comp_efficiency = self.estimate_computational_efficiency(real_trajectories)
+
+        # Task completion efficiency
+        completion_efficiency = self.estimate_completion_efficiency(real_trajectories)
+
+        return {
+            'energy_efficiency': 1.0 / (1.0 + energy_consumption) if energy_consumption > 0 else 1.0,
+            'computational_efficiency': comp_efficiency,
+            'completion_efficiency': completion_efficiency
+        }
+
+    def estimate_energy_consumption(self, trajectories: List[np.ndarray]) -> float:
+        """Estimate energy consumption from trajectories"""
+        total_energy = 0.0
+
+        for traj in trajectories:
+            for i in range(1, len(traj)):
+                # Estimate energy as sum of squared control efforts
+                control_effort = np.linalg.norm(traj[i] - traj[i-1])
+                total_energy += control_effort ** 2
+
+        return total_energy / len(trajectories) if trajectories else 0.0
+
+    def estimate_computational_efficiency(self, trajectories: List[np.ndarray]) -> float:
+        """Estimate computational efficiency"""
+        # This would measure actual computation time
+        # For simulation, return a placeholder
+        return 0.95  # 95% efficiency
+
+    def estimate_completion_efficiency(self, trajectories: List[np.ndarray]) -> float:
+        """Estimate how efficiently tasks are completed"""
+        # This would depend on specific tasks
+        # For now, return based on trajectory smoothness
+        if not trajectories:
+            return 0.0
+
+        smoothness = np.mean([self.calculate_smoothness(traj) for traj in trajectories])
+        return min(smoothness, 1.0)
+
+    def calculate_transfer_score(
+        self,
+        similarity: Dict,
+        control: Dict,
+        stability: Dict,
+        efficiency: Dict
+    ) -> float:
+        """Calculate overall transfer score"""
+
+        # Weighted combination of all metrics
+        weights = {
+            'similarity': 0.3,
+            'control': 0.25,
+            'stability': 0.25,
+            'efficiency': 0.2
+        }
+
+        # Calculate weighted score
+        score = (
+            weights['similarity'] * similarity['normalized_similarity'] +
+            weights['control'] * control['control_effort_similarity'] +
+            weights['stability'] * stability['stability_score'] +
+            weights['efficiency'] * efficiency['energy_efficiency']
+        )
+
+        return score
+
+    def calculate_success_rate(self, real_trajectories: List[np.ndarray]) -> float:
+        """Calculate task success rate"""
+        # This would depend on specific success criteria for each task
+        # For now, assume all trajectories represent successful completion
+        return 1.0 if real_trajectories else 0.0
+
+class ComparativeEvaluator(TransferEvaluator):
+    """Evaluator that compares multiple transfer methods"""
+
+    def __init__(self):
+        super().__init__()
+        self.method_results = {}
+
+    def compare_transfer_methods(
+        self,
+        methods_data: Dict[str, tuple]
+    ) -> Dict[str, Dict[str, float]]:
+        """Compare multiple transfer methods"""
+
+        comparison_results = {}
+
+        for method_name, (sim_data, real_data) in methods_data.items():
+            print(f"Evaluating transfer method: {method_name}")
+
+            # Evaluate this method
+            method_results = self.evaluate_transfer_performance(sim_data, real_data)
+            self.method_results[method_name] = method_results
+
+            comparison_results[method_name] = {
+                'transfer_score': method_results['transfer_score'],
+                'trajectory_similarity': method_results['trajectory_similarity']['normalized_similarity'],
+                'stability': method_results['stability_metrics']['stability_score'],
+                'efficiency': method_results['efficiency_metrics']['energy_efficiency'],
+                'success_rate': method_results['success_rate']
+            }
+
+        # Rank methods
+        ranked_methods = self.rank_methods(comparison_results)
+
+        return {
+            'method_comparison': comparison_results,
+            'ranked_methods': ranked_methods,
+            'best_method': ranked_methods[0][0] if ranked_methods else None
+        }
+
+    def rank_methods(self, comparison_results: Dict) -> List[tuple]:
+        """Rank methods by overall performance"""
+        rankings = []
+
+        for method, metrics in comparison_results.items():
+            # Calculate composite score
+            composite_score = (
+                0.4 * metrics['transfer_score'] +
+                0.2 * metrics['trajectory_similarity'] +
+                0.2 * metrics['stability'] +
+                0.1 * metrics['efficiency'] +
+                0.1 * metrics['success_rate']
+            )
+
+            rankings.append((method, composite_score))
+
+        # Sort by score (descending)
+        rankings.sort(key=lambda x: x[1], reverse=True)
+        return rankings
+
+    def generate_comparison_report(self, comparison_results: Dict) -> str:
+        """Generate human-readable comparison report"""
+        report = "Sim-to-Real Transfer Method Comparison Report\n"
+        report += "=" * 50 + "\n\n"
+
+        for method, metrics in comparison_results['method_comparison'].items():
+            report += f"Method: {method}\n"
+            report += f"  Transfer Score: {metrics['transfer_score']:.3f}\n"
+            report += f"  Trajectory Similarity: {metrics['trajectory_similarity']:.3f}\n"
+            report += f"  Stability: {metrics['stability']:.3f}\n"
+            report += f"  Efficiency: {metrics['efficiency']:.3f}\n"
+            report += f"  Success Rate: {metrics['success_rate']:.3f}\n\n"
+
+        report += f"Best Method: {comparison_results['best_method']}\n"
+
+        return report
+```
+
+## Best Practices for Sim-to-Real Transfer
+
+### Guidelines and Recommendations
+
+Successful sim-to-real transfer requires careful attention to best practices that address the inherent challenges of bridging simulation and reality.
+
+```python
+class Sim2RealBestPractices:
+    """Collection of best practices for sim-to-real transfer"""
+
+    def __init__(self):
+        self.guidelines = self.create_guidelines()
+        self.checklists = self.create_checklists()
+
+    def create_guidelines(self) -> Dict[str, List[str]]:
+        """Create comprehensive guidelines for sim-to-real transfer"""
+        return {
+            'model_fidelity': [
+                "Start with simplified models and gradually increase complexity",
+                "Focus on dominant dynamics that affect task performance",
+                "Validate simulation against analytical models where possible",
+                "Ensure simulation timestep matches real-time requirements",
+                "Include realistic actuator and sensor models early in development"
+            ],
+            'domain_randomization': [
+                "Randomize all uncertain parameters simultaneously",
+                "Use wide ranges initially, then narrow based on sensitivity analysis",
+                "Include temporal correlations in randomization where appropriate",
+                "Validate that randomization doesn't break fundamental physics",
+                "Monitor training progress to ensure consistent improvement"
+            ],
+            'system_identification': [
+                "Design informative excitation signals that persistently excite all modes",
+                "Collect data under various operating conditions",
+                "Include safety margins in identification experiments",
+                "Validate identified models against held-out data",
+                "Update models incrementally as more data becomes available"
+            ],
+            'adaptive_control': [
+                "Implement multiple layers of adaptation (feedforward, feedback, learning)",
+                "Include safety constraints in adaptive algorithms",
+                "Provide graceful degradation when adaptation fails",
+                "Monitor adaptation parameters for reasonable bounds",
+                "Include human oversight for safety-critical adaptations"
+            ],
+            'evaluation_metrics': [
+                "Use task-specific metrics that correlate with real-world performance",
+                "Include robustness metrics that test disturbance rejection",
+                "Measure both short-term and long-term performance",
+                "Compare against baseline methods consistently",
+                "Report confidence intervals for all measurements"
+            ],
+            'deployment_strategy': [
+                "Start with safety-constrained environments",
+                "Implement gradual autonomy escalation",
+                "Maintain human-in-the-loop capabilities",
+                "Include comprehensive logging and monitoring",
+                "Plan for rapid rollback capabilities if needed"
+            ]
+        }
+
+    def create_checklists(self) -> Dict[str, List[str]]:
+        """Create implementation checklists"""
+        return {
+            'before_training': [
+                "Verify simulation physics parameters match expected ranges",
+                "Confirm sensor noise models are realistic",
+                "Validate actuator limitations are properly modeled",
+                "Ensure simulation timestep is appropriate for control frequency",
+                "Check that environment variability covers expected real conditions"
+            ],
+            'during_training': [
+                "Monitor training curves for consistent improvement",
+                "Verify policy doesn't overfit to specific simulation conditions",
+                "Check that domain randomization ranges are effective",
+                "Validate policy behavior on held-out simulation conditions",
+                "Monitor computational requirements for real-time deployment"
+            ],
+            'before_real_world': [
+                "Conduct extensive hardware-in-the-loop testing",
+                "Verify safety constraints are properly enforced",
+                "Test emergency stop procedures",
+                "Validate communication interfaces are robust",
+                "Confirm all required sensors are functioning properly"
+            ],
+            'during_real_world': [
+                "Monitor for unexpected behaviors immediately",
+                "Track performance metrics continuously",
+                "Log all sensor and actuator data",
+                "Maintain ability to switch to safe behavior",
+                "Have human operator ready for intervention"
+            ],
+            'after_real_world': [
+                "Analyze performance data to identify gaps",
+                "Update simulation models based on real observations",
+                "Refine domain randomization based on real-world insights",
+                "Document lessons learned for future transfers",
+                "Update safety procedures based on experience"
+            ]
+        }
+
+    def get_guideline_summary(self) -> str:
+        """Get summary of key guidelines"""
+        summary = "Key Sim-to-Real Transfer Guidelines:\n\n"
+
+        for category, guidelines in self.guidelines.items():
+            summary += f"{category.upper().replace('_', ' ')}:\n"
+            for guideline in guidelines[:3]:  # Show first 3 for brevity
+                summary += f"  • {guideline}\n"
+            if len(guidelines) > 3:
+                summary += f"  • ... and {len(guidelines) - 3} more\n"
+            summary += "\n"
+
+        return summary
+
+    def run_pre_flight_checklist(self, phase: str) -> Dict[str, bool]:
+        """Run pre-flight checklist for specified phase"""
+        if phase not in self.checklists:
+            raise ValueError(f"Unknown phase: {phase}. Available: {list(self.checklists.keys())}")
+
+        checklist = self.checklists[phase]
+        results = {}
+
+        print(f"Running {phase.upper()} Checklist:")
+        for item in checklist:
+            # In practice, this would run actual checks
+            # For now, simulate user confirmation
+            print(f"  [ ] {item}")
+            # Simulate checking
+            results[item] = True  # Assume all pass for this example
+
+        return results
+
+    def validate_simulation_fidelity(self, sim_model, real_robot) -> Dict[str, bool]:
+        """Validate simulation fidelity against real robot"""
+        validation_tests = {
+            'kinematic_validation': self.validate_kinematics(sim_model, real_robot),
+            'dynamic_validation': self.validate_dynamics(sim_model, real_robot),
+            'sensor_validation': self.validate_sensors(sim_model, real_robot),
+            'actuator_validation': self.validate_actuators(sim_model, real_robot),
+            'environment_validation': self.validate_environment(sim_model, real_robot)
+        }
+
+        return validation_tests
+
+    def validate_kinematics(self, sim_model, real_robot) -> bool:
+        """Validate kinematic models"""
+        # Check forward and inverse kinematics match
+        test_poses = [
+            [0, 0, 0, 0, 0, 0],  # Zero pose
+            [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],  # Random pose
+        ]
+
+        for pose in test_poses:
+            sim_fk = sim_model.forward_kinematics(pose)
+            real_fk = real_robot.forward_kinematics(pose)
+
+            # Check if positions are close enough
+            if np.linalg.norm(sim_fk - real_fk) > 0.01:  # 1cm tolerance
+                return False
+
+        return True
+
+    def validate_dynamics(self, sim_model, real_robot) -> bool:
+        """Validate dynamic models"""
+        # This would involve comparing response to known inputs
+        # For simplicity, return True
+        return True
+
+    def validate_sensors(self, sim_model, real_robot) -> bool:
+        """Validate sensor models"""
+        # Check sensor characteristics match
+        return True
+
+    def validate_actuators(self, sim_model, real_robot) -> bool:
+        """Validate actuator models"""
+        # Check actuator characteristics match
+        return True
+
+    def validate_environment(self, sim_model, real_robot) -> bool:
+        """Validate environmental models"""
+        # Check contact models, friction, etc.
+        return True
+
+    def recommend_improvements(self, current_metrics: Dict) -> List[str]:
+        """Recommend improvements based on current metrics"""
+        recommendations = []
+
+        # Analyze trajectory similarity
+        if current_metrics.get('trajectory_similarity', {}).get('normalized_similarity', 0) < 0.7:
+            recommendations.append("Increase domain randomization for better generalization")
+            recommendations.append("Consider system identification to improve model accuracy")
+
+        # Analyze stability
+        if current_metrics.get('stability_metrics', {}).get('stability_score', 1) < 0.8:
+            recommendations.append("Implement additional balance control strategies")
+            recommendations.append("Review center of mass and support polygon calculations")
+
+        # Analyze efficiency
+        if current_metrics.get('efficiency_metrics', {}).get('energy_efficiency', 1) < 0.7:
+            recommendations.append("Optimize control parameters for energy efficiency")
+            recommendations.append("Consider model predictive control for better planning")
+
+        # Analyze success rate
+        if current_metrics.get('success_rate', 1) < 0.8:
+            recommendations.append("Add more training scenarios to cover edge cases")
+            recommendations.append("Implement robust error recovery mechanisms")
+
+        return recommendations
+
+class TransferQualityAssurance:
+    """Quality assurance framework for sim-to-real transfer"""
+
+    def __init__(self):
+        self.best_practices = Sim2RealBestPractices()
+        self.qa_metrics = {}
+        self.risk_assessment = {}
+
+    def conduct_qa_review(self, transfer_system) -> Dict[str, Any]:
+        """Conduct comprehensive QA review of transfer system"""
+
+        # Run pre-flight checklists
+        checklists_passed = self.run_comprehensive_checklists()
+
+        # Validate simulation fidelity
+        fidelity_validated = self.best_practices.validate_simulation_fidelity(
+            transfer_system.sim_model,
+            transfer_system.real_robot
+        )
+
+        # Evaluate current performance
+        current_performance = self.evaluate_current_performance(transfer_system)
+
+        # Assess risks
+        risk_assessment = self.assess_risks(transfer_system)
+
+        # Generate recommendations
+        recommendations = self.best_practices.recommend_improvements(current_performance)
+
+        # Overall QA score
+        qa_score = self.calculate_qa_score(
+            checklists_passed,
+            fidelity_validated,
+            current_performance,
+            risk_assessment
+        )
+
+        return {
+            'checklists_passed': checklists_passed,
+            'fidelity_validation': fidelity_validated,
+            'current_performance': current_performance,
+            'risk_assessment': risk_assessment,
+            'recommendations': recommendations,
+            'qa_score': qa_score,
+            'transfer_approval': qa_score > 0.8  # 80% threshold for approval
+        }
+
+    def run_comprehensive_checklists(self) -> Dict[str, Dict[str, bool]]:
+        """Run all pre-flight checklists"""
+        results = {}
+
+        for phase in self.best_practices.checklists.keys():
+            results[phase] = self.best_practices.run_pre_flight_checklist(phase)
+
+        return results
+
+    def evaluate_current_performance(self, transfer_system) -> Dict[str, float]:
+        """Evaluate current transfer performance"""
+        # This would run actual evaluation
+        # For now, return placeholder values
+        return {
+            'trajectory_similarity': {'normalized_similarity': 0.85},
+            'stability_metrics': {'stability_score': 0.92},
+            'efficiency_metrics': {'energy_efficiency': 0.78},
+            'success_rate': 0.89
+        }
+
+    def assess_risks(self, transfer_system) -> Dict[str, str]:
+        """Assess risks associated with transfer"""
+        return {
+            'high_risk': [],
+            'medium_risk': ['Potential model-plant mismatch', 'Sensor noise effects'],
+            'low_risk': ['Minor parameter variations'],
+            'mitigation_strategies': [
+                'Implement safety constraints',
+                'Use robust control methods',
+                'Maintain human oversight'
+            ]
+        }
+
+    def calculate_qa_score(
+        self,
+        checklists: Dict,
+        fidelity: Dict,
+        performance: Dict,
+        risks: Dict
+    ) -> float:
+        """Calculate overall QA score"""
+
+        # Calculate scores for each category
+        checklist_score = self.calculate_checklist_score(checklists)
+        fidelity_score = self.calculate_fidelity_score(fidelity)
+        performance_score = self.calculate_performance_score(performance)
+        risk_score = self.calculate_risk_score(risks)
+
+        # Weighted average
+        weights = {
+            'checklist': 0.25,
+            'fidelity': 0.25,
+            'performance': 0.3,
+            'risk': 0.2
+        }
+
+        overall_score = (
+            weights['checklist'] * checklist_score +
+            weights['fidelity'] * fidelity_score +
+            weights['performance'] * performance_score +
+            weights['risk'] * risk_score
+        )
+
+        return overall_score
+
+    def calculate_checklist_score(self, checklists: Dict) -> float:
+        """Calculate score based on checklist completion"""
+        total_items = 0
+        passed_items = 0
+
+        for phase, items in checklists.items():
+            for item, passed in items.items():
+                total_items += 1
+                if passed:
+                    passed_items += 1
+
+        return passed_items / total_items if total_items > 0 else 0.0
+
+    def calculate_fidelity_score(self, fidelity: Dict) -> float:
+        """Calculate score based on fidelity validation"""
+        passed_tests = sum(1 for result in fidelity.values() if result)
+        total_tests = len(fidelity)
+
+        return passed_tests / total_tests if total_tests > 0 else 0.0
+
+    def calculate_performance_score(self, performance: Dict) -> float:
+        """Calculate score based on performance metrics"""
+        # Weighted average of key performance indicators
+        similarity_score = performance.get('trajectory_similarity', {}).get('normalized_similarity', 0)
+        stability_score = performance.get('stability_metrics', {}).get('stability_score', 0)
+        efficiency_score = performance.get('efficiency_metrics', {}).get('energy_efficiency', 0)
+        success_score = performance.get('success_rate', 0)
+
+        return (similarity_score + stability_score + efficiency_score + success_score) / 4
+
+    def calculate_risk_score(self, risks: Dict) -> float:
+        """Calculate score based on risk assessment (lower risk = higher score)"""
+        high_risk_count = len(risks.get('high_risk', []))
+        medium_risk_count = len(risks.get('medium_risk', []))
+        low_risk_count = len(risks.get('low_risk', []))
+
+        # Calculate risk score (inverted - lower risk is better)
+        total_risks = high_risk_count * 3 + medium_risk_count * 2 + low_risk_count * 1
+        risk_penalty = min(total_risks / 10.0, 1.0)  # Cap at 1.0
+
+        return 1.0 - risk_penalty
+```
+
+## Troubleshooting Common Issues
+
+### Diagnosing and Resolving Transfer Problems
+
+Common issues in sim-to-real transfer often stem from modeling errors, sensor discrepancies, or control limitations. Understanding these problems is crucial for successful deployment.
+
+```python
+class TransferTroubleshooter:
+    """Diagnostic and troubleshooting framework for sim-to-real transfer issues"""
+
+    def __init__(self):
+        self.diagnostic_tools = self.initialize_diagnostic_tools()
+        self.solution_database = self.create_solution_database()
+
+    def initialize_diagnostic_tools(self):
+        """Initialize diagnostic tools for transfer issues"""
+        return {
+            'model_verification': self.verify_model_accuracy,
+            'sensor_analysis': self.analyze_sensor_discrepancies,
+            'control_stability': self.analyze_control_stability,
+            'parameter_sensitivity': self.analyze_parameter_sensitivity,
+            'environment_mapping': self.map_environment_differences
+        }
+
+    def create_solution_database(self) -> Dict[str, List[str]]:
+        """Create database of common issues and solutions"""
+        return {
+            'high_frequency_oscillation': [
+                "Reduce control gains",
+                "Add low-pass filtering to sensor signals",
+                "Decrease simulation timestep",
+                "Check for numerical integration instability"
+            ],
+            'drift_away_from_target': [
+                "Increase integral gain in PID controllers",
+                "Verify sensor calibration",
+                "Check for unmodeled external forces",
+                "Implement bias estimation and compensation"
+            ],
+            'excessive_energy_consumption': [
+                "Optimize control parameters for efficiency",
+                "Implement energy-aware control strategies",
+                "Check for unnecessary high-frequency control updates",
+                "Verify actuator efficiency parameters"
+            ],
+            'poor_disturbance_rejection': [
+                "Increase robustness through domain randomization",
+                "Implement disturbance observers",
+                "Add adaptive control elements",
+                "Verify disturbance models in simulation"
+            ],
+            'unstable_contact_interactions': [
+                "Refine contact models and friction parameters",
+                "Implement impedance control for compliant behavior",
+                "Add contact state estimation",
+                "Verify contact force sensor calibration"
+            ],
+            'safety_constraint_violations': [
+                "Implement stricter safety limits",
+                "Add backup safety controllers",
+                "Verify constraint enforcement algorithms",
+                "Implement real-time monitoring and intervention"
+            ],
+            'performance_degradation_over_time': [
+                "Implement online parameter adaptation",
+                "Schedule regular model updates",
+                "Monitor component wear and tear",
+                "Implement predictive maintenance"
+            ]
+        }
+
+    def diagnose_transfer_issue(self, observed_behavior: Dict) -> Dict[str, Any]:
+        """Diagnose transfer issue based on observed behavior"""
+
+        # Analyze the symptoms
+        symptoms = self.analyze_symptoms(observed_behavior)
+
+        # Match symptoms to known issues
+        likely_issues = self.match_symptoms_to_issues(symptoms)
+
+        # Generate diagnostic report
+        diagnostic_report = self.generate_diagnostic_report(symptoms, likely_issues)
+
+        # Provide solutions
+        solutions = self.get_appropriate_solutions(likely_issues)
+
+        return {
+            'symptoms': symptoms,
+            'likely_issues': likely_issues,
+            'diagnostic_report': diagnostic_report,
+            'recommended_solutions': solutions,
+            'confidence_level': self.assess_confidence(symptoms, likely_issues)
+        }
+
+    def analyze_symptoms(self, behavior_data: Dict) -> Dict[str, Any]:
+        """Analyze behavioral symptoms to identify patterns"""
+
+        symptoms = {}
+
+        # Analyze trajectory deviations
+        if 'trajectory_data' in behavior_data:
+            traj_deviation = self.analyze_trajectory_deviation(behavior_data['trajectory_data'])
+            symptoms['trajectory_deviation'] = traj_deviation
+
+        # Analyze control signal patterns
+        if 'control_signals' in behavior_data:
+            control_patterns = self.analyze_control_patterns(behavior_data['control_signals'])
+            symptoms['control_patterns'] = control_patterns
+
+        # Analyze stability indicators
+        if 'stability_data' in behavior_data:
+            stability_indicators = self.analyze_stability_indicators(behavior_data['stability_data'])
+            symptoms['stability_indicators'] = stability_indicators
+
+        # Analyze energy consumption patterns
+        if 'energy_data' in behavior_data:
+            energy_patterns = self.analyze_energy_patterns(behavior_data['energy_data'])
+            symptoms['energy_patterns'] = energy_patterns
+
+        return symptoms
+
+    def analyze_trajectory_deviation(self, trajectory_data: Dict) -> Dict[str, float]:
+        """Analyze trajectory deviation patterns"""
+
+        sim_trajectory = trajectory_data['sim']
+        real_trajectory = trajectory_data['real']
+
+        # Calculate various deviation metrics
+        mse = mean_squared_error(sim_trajectory, real_trajectory)
+        rmse = np.sqrt(mse)
+
+        # Analyze deviation patterns over time
+        deviations = np.abs(sim_trajectory - real_trajectory)
+        deviation_trends = {
+            'mean_deviation': np.mean(deviations),
+            'max_deviation': np.max(deviations),
+            'deviation_std': np.std(deviations),
+            'trend_slope': self.calculate_trend_slope(deviations),
+            'oscillation_frequency': self.detect_oscillation_frequency(deviations)
+        }
+
+        return deviation_trends
+
+    def calculate_trend_slope(self, data: np.ndarray) -> float:
+        """Calculate trend slope of data over time"""
+        x = np.arange(len(data))
+        slope = np.polyfit(x, data, 1)[0]
+        return slope
+
+    def detect_oscillation_frequency(self, data: np.ndarray) -> float:
+        """Detect dominant oscillation frequency in data"""
+        # Use FFT to find dominant frequency
+        fft_result = np.fft.fft(data)
+        frequencies = np.fft.fftfreq(len(data))
+
+        # Find peak frequency (excluding DC component)
+        magnitudes = np.abs(fft_result)
+        peak_idx = np.argmax(magnitudes[1:]) + 1  # Skip DC component
+
+        return frequencies[peak_idx] if len(frequencies) > peak_idx else 0.0
+
+    def analyze_control_patterns(self, control_data: Dict) -> Dict[str, float]:
+        """Analyze control signal patterns for anomalies"""
+
+        control_signals = control_data['signals']
+
+        patterns = {
+            'signal_variance': np.var(control_signals),
+            'frequency_content': self.analyze_frequency_content(control_signals),
+            'saturation_events': self.count_saturation_events(control_signals),
+            'chattering_detection': self.detect_chattering(control_signals),
+            'efficiency_metrics': self.calculate_efficiency_metrics(control_signals)
+        }
+
+        return patterns
+
+    def analyze_frequency_content(self, signals: np.ndarray) -> Dict[str, float]:
+        """Analyze frequency content of control signals"""
+        fft_result = np.fft.fft(signals, axis=0)
+        power_spectrum = np.abs(fft_result) ** 2
+
+        # Calculate power in different frequency bands
+        total_power = np.sum(power_spectrum, axis=0)
+
+        low_freq_power = np.sum(power_spectrum[:len(power_spectrum)//4], axis=0)
+        mid_freq_power = np.sum(power_spectrum[len(power_spectrum)//4:3*len(power_spectrum)//4], axis=0)
+        high_freq_power = np.sum(power_spectrum[3*len(power_spectrum)//4:], axis=0)
+
+        return {
+            'low_freq_ratio': low_freq_power / (total_power + 1e-6),
+            'mid_freq_ratio': mid_freq_power / (total_power + 1e-6),
+            'high_freq_ratio': high_freq_power / (total_power + 1e-6),
+            'dominant_frequency': np.argmax(power_spectrum)
+        }
+
+    def count_saturation_events(self, signals: np.ndarray, threshold: float = 0.95) -> int:
+        """Count saturation events in control signals"""
+        signal_norms = np.linalg.norm(signals, axis=1)
+        max_allowable = np.max(signal_norms) * threshold
+        saturation_events = np.sum(signal_norms > max_allowable)
+
+        return saturation_events
+
+    def detect_chattering(self, signals: np.ndarray, window_size: int = 10) -> float:
+        """Detect chattering in control signals"""
+        # Calculate rate of change in control signals
+        if len(signals) < 2:
+            return 0.0
+
+        signal_changes = np.diff(signals, axis=0)
+        change_magnitudes = np.linalg.norm(signal_changes, axis=1)
+
+        # Look for rapid changes (chattering)
+        chattering_score = np.mean(change_magnitudes) * len(change_magnitudes)
+
+        return chattering_score
+
+    def calculate_efficiency_metrics(self, signals: np.ndarray) -> Dict[str, float]:
+        """Calculate efficiency metrics for control signals"""
+        signal_energy = np.sum(np.sum(signals ** 2, axis=1))
+        signal_smoothness = self.calculate_signal_smoothness(signals)
+
+        return {
+            'energy_consumption': signal_energy,
+            'smoothness_score': signal_smoothness,
+            'control_effort': np.mean(np.linalg.norm(signals, axis=1))
+        }
+
+    def calculate_signal_smoothness(self, signals: np.ndarray) -> float:
+        """Calculate smoothness of control signals"""
+        if len(signals) < 3:
+            return 1.0
+
+        # Calculate second derivative (jerk) for smoothness
+        second_deriv = np.diff(signals, n=2, axis=0)
+        jerk_magnitude = np.mean(np.linalg.norm(second_deriv, axis=1))
+
+        # Lower jerk = higher smoothness
+        return 1.0 / (1.0 + jerk_magnitude)
+
+    def analyze_stability_indicators(self, stability_data: Dict) -> Dict[str, float]:
+        """Analyze stability-related indicators"""
+
+        stability_indicators = {
+            'lyapunov_exponents': self.estimate_lyapunov_exponents(stability_data),
+            'phase_portrait_analysis': self.analyze_phase_portrait(stability_data),
+            'basin_of_attraction': self.estimate_basin_of_attraction(stability_data),
+            'convergence_rate': self.calculate_convergence_rate(stability_data)
+        }
+
+        return stability_indicators
+
+    def estimate_lyapunov_exponents(self, stability_data: Dict) -> List[float]:
+        """Estimate Lyapunov exponents for stability analysis"""
+        # Simplified estimation - in practice, this would be more complex
+        return [0.0]  # Stable system has negative exponents
+
+    def analyze_phase_portrait(self, stability_data: Dict) -> Dict[str, float]:
+        """Analyze phase portrait for stability characteristics"""
+        # This would plot and analyze phase portraits
+        return {'stability_characteristics': 'unknown'}
+
+    def estimate_basin_of_attraction(self, stability_data: Dict) -> float:
+        """Estimate basin of attraction size"""
+        return 1.0  # Placeholder
+
+    def calculate_convergence_rate(self, stability_data: Dict) -> float:
+        """Calculate convergence rate to desired state"""
+        return 0.1  # Placeholder
+
+    def analyze_energy_patterns(self, energy_data: Dict) -> Dict[str, float]:
+        """Analyze energy consumption patterns"""
+
+        energy_patterns = {
+            'consumption_rate': self.calculate_consumption_rate(energy_data),
+            'efficiency_metrics': self.calculate_energy_efficiency(energy_data),
+            'waste_analysis': self.analyze_energy_waste(energy_data),
+            'optimization_potential': self.estimate_optimization_potential(energy_data)
+        }
+
+        return energy_patterns
+
+    def calculate_consumption_rate(self, energy_data: Dict) -> float:
+        """Calculate energy consumption rate"""
+        return np.mean(energy_data.get('consumption', [0.0]))
+
+    def calculate_energy_efficiency(self, energy_data: Dict) -> float:
+        """Calculate energy efficiency metrics"""
+        return 0.8  # Placeholder
+
+    def analyze_energy_waste(self, energy_data: Dict) -> float:
+        """Analyze potential energy waste"""
+        return 0.2  # Placeholder
+
+    def estimate_optimization_potential(self, energy_data: Dict) -> float:
+        """Estimate potential for energy optimization"""
+        return 0.3  # Placeholder
+
+    def match_symptoms_to_issues(self, symptoms: Dict) -> List[str]:
+        """Match observed symptoms to known transfer issues"""
+
+        issue_probabilities = {}
+
+        # Match trajectory deviation patterns
+        if 'trajectory_deviation' in symptoms:
+            dev_stats = symptoms['trajectory_deviation']
+
+            if dev_stats['oscillation_frequency'] > 0.1:
+                issue_probabilities['high_frequency_oscillation'] = 0.9
+            elif dev_stats['trend_slope'] > 0.01:
+                issue_probabilities['drift_away_from_target'] = 0.8
+            elif dev_stats['mean_deviation'] > 0.5:
+                issue_probabilities['poor_disturbance_rejection'] = 0.7
+
+        # Match control pattern issues
+        if 'control_patterns' in symptoms:
+            ctrl_stats = symptoms['control_patterns']
+
+            if ctrl_stats['chattering_detection'] > 10:
+                issue_probabilities['high_frequency_oscillation'] = max(
+                    issue_probabilities.get('high_frequency_oscillation', 0), 0.8
+                )
+            if ctrl_stats['saturation_events'] > 5:
+                issue_probabilities['control_instability'] = 0.7
+            if ctrl_stats['efficiency_metrics']['energy_consumption'] > 100:
+                issue_probabilities['excessive_energy_consumption'] = 0.8
+
+        # Sort issues by probability
+        sorted_issues = sorted(issue_probabilities.items(), key=lambda x: x[1], reverse=True)
+
+        return [issue for issue, prob in sorted_issues if prob > 0.5]
+
+    def generate_diagnostic_report(self, symptoms: Dict, likely_issues: List[str]) -> str:
+        """Generate comprehensive diagnostic report"""
+
+        report = "TRANSFER DIAGNOSTIC REPORT\n"
+        report += "=" * 50 + "\n\n"
+
+        report += "SYMPTOMS ANALYZED:\n"
+        for symptom_category, details in symptoms.items():
+            report += f"  {symptom_category}:\n"
+            for key, value in list(details.items())[:3]:  # Show first 3 details
+                report += f"    {key}: {value}\n"
+            report += "\n"
+
+        report += "LIKELY ISSUES:\n"
+        for issue in likely_issues:
+            report += f"  - {issue}\n"
+        report += "\n"
+
+        return report
+
+    def get_appropriate_solutions(self, issues: List[str]) -> List[str]:
+        """Get appropriate solutions for identified issues"""
+
+        all_solutions = []
+
+        for issue in issues:
+            if issue in self.solution_database:
+                all_solutions.extend(self.solution_database[issue])
+
+        # Remove duplicates while preserving order
+        unique_solutions = list(dict.fromkeys(all_solutions))
+
+        return unique_solutions
+
+    def assess_confidence(self, symptoms: Dict, issues: List[str]) -> float:
+        """Assess confidence level in diagnosis"""
+
+        # Confidence based on number of supporting symptoms
+        symptom_support = len(symptoms)
+
+        # Confidence based on issue clarity
+        issue_clarity = len(issues) / 5.0 if issues else 0.0  # Max 5 issues
+
+        # Overall confidence
+        confidence = min((symptom_support * 0.3 + issue_clarity * 0.7), 1.0)
+
+        return confidence
+
+    def run_diagnostic_suite(self, system_state: Dict) -> Dict[str, Any]:
+        """Run comprehensive diagnostic suite"""
+
+        # Run individual diagnostic tools
+        model_accuracy = self.diagnostic_tools['model_verification'](system_state)
+        sensor_analysis = self.diagnostic_tools['sensor_analysis'](system_state)
+        control_stability = self.diagnostic_tools['control_stability'](system_state)
+        parameter_sensitivity = self.diagnostic_tools['parameter_sensitivity'](system_state)
+        environment_mapping = self.diagnostic_tools['environment_mapping'](system_state)
+
+        # Compile results
+        diagnostic_results = {
+            'model_accuracy': model_accuracy,
+            'sensor_analysis': sensor_analysis,
+            'control_stability': control_stability,
+            'parameter_sensitivity': parameter_sensitivity,
+            'environment_mapping': environment_mapping,
+            'overall_health': self.calculate_system_health([
+                model_accuracy, sensor_analysis, control_stability,
+                parameter_sensitivity, environment_mapping
+            ])
+        }
+
+        return diagnostic_results
+
+    def verify_model_accuracy(self, system_state: Dict) -> float:
+        """Verify model accuracy against real measurements"""
+        # Compare simulation output with real sensor readings
+        return 0.85  # Placeholder
+
+    def analyze_sensor_discrepancies(self, system_state: Dict) -> Dict[str, float]:
+        """Analyze discrepancies between simulated and real sensors"""
+        return {
+            'bias_errors': 0.01,
+            'noise_levels': 0.02,
+            'delay_mismatch': 0.005
+        }
+
+    def analyze_control_stability(self, system_state: Dict) -> float:
+        """Analyze control system stability"""
+        return 0.92  # Placeholder
+
+    def analyze_parameter_sensitivity(self, system_state: Dict) -> Dict[str, float]:
+        """Analyze sensitivity to parameter variations"""
+        return {
+            'mass_sensitivity': 0.1,
+            'friction_sensitivity': 0.3,
+            'stiffness_sensitivity': 0.2
+        }
+
+    def map_environment_differences(self, system_state: Dict) -> Dict[str, float]:
+        """Map differences between simulation and real environment"""
+        return {
+            'friction_difference': 0.15,
+            'inertia_difference': 0.08,
+            'disturbance_level': 0.25
+        }
+
+    def calculate_system_health(self, component_health: List[float]) -> float:
+        """Calculate overall system health score"""
+        return sum(component_health) / len(component_health) if component_health else 0.0
+
+class PreventiveMaintenanceSystem:
+    """System for preventing transfer issues before they occur"""
+
+    def __init__(self):
+        self.troubleshooter = TransferTroubleshooter()
+        self.monitoring_thresholds = self.set_monitoring_thresholds()
+        self.early_warning_indicators = []
+
+    def set_monitoring_thresholds(self) -> Dict[str, float]:
+        """Set thresholds for monitoring various parameters"""
+        return {
+            'trajectory_deviation': 0.1,  # 10% deviation threshold
+            'control_effort_increase': 0.5,  # 50% increase threshold
+            'stability_metric': 0.2,  # Below 0.2 indicates instability
+            'energy_efficiency_drop': 0.2,  # 20% drop threshold
+            'oscillation_frequency': 0.1,  # Above 0.1 Hz oscillation
+            'parameter_drift': 0.15  # 15% parameter drift threshold
+        }
+
+    def monitor_system_health(self, current_metrics: Dict) -> Dict[str, bool]:
+        """Monitor system health and detect early warning signs"""
+
+        warnings = {}
+
+        # Check trajectory deviation
+        if current_metrics.get('trajectory_deviation', {}).get('mean_deviation', 0) > self.monitoring_thresholds['trajectory_deviation']:
+            warnings['trajectory_drift'] = True
+
+        # Check control effort
+        if current_metrics.get('control_patterns', {}).get('efficiency_metrics', {}).get('control_effort', 0) > (
+            1 + self.monitoring_thresholds['control_effort_increase']
+        ) * self.get_baseline_value('control_effort'):
+            warnings['excessive_control_effort'] = True
+
+        # Check stability
+        if current_metrics.get('stability_indicators', {}).get('convergence_rate', 1.0) < self.monitoring_thresholds['stability_metric']:
+            warnings['stability_degradation'] = True
+
+        # Check energy efficiency
+        if current_metrics.get('energy_patterns', {}).get('efficiency_metrics', {}).get('energy_efficiency', 1.0) < (
+            1 - self.monitoring_thresholds['energy_efficiency_drop']
+        ) * self.get_baseline_value('energy_efficiency'):
+            warnings['energy_efficiency_degradation'] = True
+
+        # Check for oscillations
+        if current_metrics.get('trajectory_deviation', {}).get('oscillation_frequency', 0) > self.monitoring_thresholds['oscillation_frequency']:
+            warnings['oscillation_detection'] = True
+
+        return warnings
+
+    def get_baseline_value(self, metric_name: str) -> float:
+        """Get baseline value for comparison"""
+        baselines = {
+            'control_effort': 10.0,
+            'energy_efficiency': 0.8,
+            'stability_metric': 0.9
+        }
+        return baselines.get(metric_name, 1.0)
+
+    def trigger_preventive_actions(self, warnings: Dict[str, bool]) -> List[str]:
+        """Trigger preventive actions based on warnings"""
+
+        actions = []
+
+        if warnings.get('trajectory_drift'):
+            actions.append("Initiate trajectory recalibration procedure")
+            actions.append("Check sensor calibration")
+
+        if warnings.get('excessive_control_effort'):
+            actions.append("Reduce control gains temporarily")
+            actions.append("Check for external disturbances")
+
+        if warnings.get('stability_degradation'):
+            actions.append("Activate backup stability controller")
+            actions.append("Initiate parameter identification")
+
+        if warnings.get('energy_efficiency_degradation'):
+            actions.append("Optimize control parameters")
+            actions.append("Check actuator efficiency")
+
+        if warnings.get('oscillation_detection'):
+            actions.append("Add low-pass filtering")
+            actions.append("Reduce control bandwidth")
+
+        return actions
+
+    def run_preventive_maintenance_cycle(self, system_metrics: Dict) -> Dict[str, Any]:
+        """Run a complete preventive maintenance cycle"""
+
+        # Monitor system health
+        warnings = self.monitor_system_health(system_metrics)
+
+        # Trigger preventive actions
+        actions = self.trigger_preventive_actions(warnings)
+
+        # If critical issues detected, recommend deeper analysis
+        critical_issues = [warning for warning, active in warnings.items() if active]
+
+        if critical_issues:
+            diagnostic_recommendation = self.troubleshooter.diagnose_transfer_issue(
+                {'symptoms': system_metrics, 'issues': critical_issues}
+            )
+        else:
+            diagnostic_recommendation = None
+
+        return {
+            'detected_warnings': warnings,
+            'preventive_actions': actions,
+            'diagnostic_recommendation': diagnostic_recommendation,
+            'maintenance_priority': len(critical_issues),
+            'next_check_interval': self.calculate_next_check_interval(len(critical_issues))
+        }
+
+    def calculate_next_check_interval(self, issue_count: int) -> float:
+        """Calculate next check interval based on issue severity"""
+        base_interval = 3600  # 1 hour in seconds
+
+        if issue_count == 0:
+            return base_interval * 2  # Check less frequently if no issues
+        elif issue_count <= 2:
+            return base_interval  # Normal interval
+        else:
+            return base_interval / 2  # Check more frequently with many issues
+```
+
+## Summary
+
+Sim-to-real transfer represents one of the most challenging aspects of deploying AI-controlled humanoid robots. The reality gap between simulation and the physical world can lead to significant performance degradation when policies trained in simulation are deployed on real robots. This chapter has covered comprehensive approaches to bridge this gap:
+
+### Key Techniques Covered:
+
+1. **Domain Randomization**: Systematically varying simulation parameters during training to create robust policies that can handle environmental uncertainty.
+
+2. **System Identification**: Characterizing real robot dynamics through experimental data to improve simulation fidelity and update model parameters.
+
+3. **Adaptive Control**: Implementing controllers that adjust their parameters in real-time to compensate for model mismatches and changing conditions.
+
+4. **Curriculum Learning**: Gradually increasing task complexity and environmental realism to build robust foundational skills before attempting complex behaviors.
+
+5. **Hardware-in-the-Loop Testing**: Combining real hardware components with simulated environments to validate transfer strategies in a controlled setting.
+
+### Best Practices:
+
+- Start with simplified models and gradually increase complexity
+- Use wide-ranging domain randomization parameters initially
+- Validate simulation against analytical models and real data
+- Implement multiple layers of safety and monitoring
+- Use comprehensive evaluation metrics that correlate with real-world performance
+- Maintain human oversight during initial deployments
+
+### Evaluation and Monitoring:
+
+The chapter emphasized the importance of quantitative assessment using multiple metrics including trajectory similarity, stability, efficiency, and success rates. Continuous monitoring and preventive maintenance systems help detect and address issues before they become critical.
+
+## Next Steps
+
+In the next chapter, we'll explore Hardware-Accelerated Visual-Inertial SLAM (VSLAM) for humanoid robots, focusing on NVIDIA's Isaac SLAM and Omniverse Replicator for creating synthetic training data. We'll cover how to implement robust localization and mapping systems that enable humanoid robots to navigate and interact with their environment effectively.
+
+---
+
+**Estimated Reading Time**: 32 minutes
