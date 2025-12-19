@@ -1,0 +1,33 @@
+# Windows-Optimized Requirements (Pre-built wheels only)
+# Use this on Windows to avoid C++ compilation issues
+
+# FastAPI Core
+fastapi>=0.115.0
+uvicorn[standard]==0.24.0
+pydantic>=2.9.0
+pydantic-settings==2.1.0
+python-multipart==0.0.6
+
+# Database (has pre-built Windows wheels)
+asyncpg==0.31.0
+
+# Vector Database (install with --only-binary flag)
+# Install separately: pip install qdrant-client==1.11.2 --only-binary=:all:
+
+# Local Embeddings
+fastembed>=0.7.4
+
+# Google Gemini
+google-generativeai==0.3.2
+
+# HTTP Client
+httpx==0.25.2
+
+# Environment & Config
+python-dotenv==1.0.0
+
+# Rate Limiting
+slowapi==0.1.9
+
+# Utilities
+aiofiles==23.2.1

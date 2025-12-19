@@ -1,0 +1,728 @@
+openapi: 3.0.3
+info:
+  title: NeuroBot RAG Chatbot API
+  version: 1.0.0
+  description: |
+    REST API for the NeuroBot Physical AI & Humanoid Robotics textbook chatbot.
+    Provides intelligent Q&A using Retrieval-Augmented Generation (RAG) with OpenAI GPT-4 and Qdrant vector search.
+
+    **Key Features:**
+    - General textbook Q&A with source citations
+    - Context-aware selected text queries
+    - Multi-turn conversation history
+    - <3 second response time (95th percentile)
+    - Rate limiting (10 req/min per session, 100 req/hour per IP)
+
+  contact:
+    name: NeuroBot Team
+    url: https://github.com/MominKhanX/Final-humanoid-ai-textbook
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://neurobot-chatbot-api.render.com
+    description: Production server (Render.com)
+  - url: http://localhost:8000
+    description: Local development server
+
+tags:
+  - name: chat
+    description: Chat endpoints for Q&A interactions
+  - name: history
+    description: Conversation history management
+  - name: health
+    description: Health check and monitoring
+
+paths:
+  /chat:
+    post:
+      tags:
+        - chat
+      summary: General textbook Q&A
+      description: |
+        Submit a question about textbook content and receive an AI-generated answer with source citations.
+
+        **Response Time**: <3 seconds (95th percentile)
+        **Rate Limit**: 10 requests/minute per session, 100 requests/hour per IP
+
+        **RAG Pipeline**:
+        1. Generate question embedding (OpenAI text-embedding-3-small)
+        2. Search Qdrant for top 5 relevant chunks
+        3. Generate answer with GPT-4-turbo using retrieved context
+        4. Extract citations and return structured response
+      operationId: chatGeneral
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              simpleQuestion:
+                summary: Simple ROS 2 question
+                value:
+                  question: "What is a ROS 2 node?"
+                  session_id: null
+              followUpQuestion:
+                summary: Follow-up with session context
+                value:
+                  question: "How does it communicate with other nodes?"
+                  session_id: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Successful response with answer and citations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                successWithCitations:
+                  summary: Answer with multiple citations
+                  value:
+                    answer: "A ROS 2 node is a process that performs computation. Nodes communicate with each other using topics, services, and actions. Each node typically has a specific purpose, such as controlling a motor or processing sensor data."
+                    sources:
+                      - module_id: "module-1-ros2"
+                        chapter_id: "chapter-1"
+                        section_title: "Introduction to ROS 2 Nodes"
+                        url: "/docs/module-1-ros2/chapter-1#ros2-nodes"
+                        relevance_score: 0.92
+                      - module_id: "module-1-ros2"
+                        chapter_id: "chapter-2"
+                        section_title: "Node Communication Patterns"
+                        url: "/docs/module-1-ros2/chapter-2#communication"
+                        relevance_score: 0.85
+                    session_id: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-12-16T10:30:45.123Z"
+                    response_time_ms: 1847
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /chat/selected:
+    post:
+      tags:
+        - chat
+      summary: Context-aware selected text query
+      description: |
+        Ask a question about a specific text selection from the textbook.
+        The selected text provides additional context for more precise answers.
+
+        **Use Case**: Student highlights code snippet or paragraph and asks for clarification.
+        **Response Time**: <3 seconds (95th percentile)
+        **Rate Limit**: 10 requests/minute per session, 100 requests/hour per IP
+      operationId: chatSelected
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectedTextRequest'
+            examples:
+              codeExplanation:
+                summary: Ask about selected code
+                value:
+                  question: "What does the 10 parameter mean here?"
+                  selected_text: "publisher = self.create_publisher(String, 'topic', 10)"
+                  session_id: null
+              paragraphClarification:
+                summary: Ask about selected paragraph
+                value:
+                  question: "Can you give me a concrete example?"
+                  selected_text: "Sim-to-real transfer involves training a robot in simulation and deploying the learned policy to real hardware. This requires careful domain randomization and reality gap mitigation."
+                  session_id: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Context-aware answer focused on selected text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                codeExplanation:
+                  summary: Answer about code snippet
+                  value:
+                    answer: "The '10' parameter in create_publisher() specifies the QoS (Quality of Service) queue size. This determines how many messages can be buffered if the publisher is sending faster than subscribers can receive. A value of 10 means up to 10 messages will be queued before old ones are discarded."
+                    sources:
+                      - module_id: "module-1-ros2"
+                        chapter_id: "chapter-3"
+                        section_title: "Publisher Configuration and QoS"
+                        url: "/docs/module-1-ros2/chapter-3#qos-settings"
+                        relevance_score: 0.94
+                    session_id: "550e8400-e29b-41d4-a716-446655440001"
+                    timestamp: "2025-12-16T10:32:15.456Z"
+                    response_time_ms: 1652
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /chat/history:
+    get:
+      tags:
+        - history
+      summary: Retrieve conversation history
+      description: |
+        Get all messages for a specific session, ordered chronologically.
+        Used to restore conversation context when user reopens chatbot or refreshes page.
+
+        **Use Case**: User closes browser and returns later; frontend loads history from backend.
+        **Retention**: Sessions expire after 24 hours of inactivity.
+      operationId: getChatHistory
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          description: UUID of the conversation session
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of messages to return (default 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 20
+        - name: offset
+          in: query
+          required: false
+          description: Number of messages to skip for pagination (default 0)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          example: 0
+      responses:
+        '200':
+          description: Conversation history retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryResponse'
+              examples:
+                multiMessageHistory:
+                  summary: Session with 3 messages
+                  value:
+                    session_id: "550e8400-e29b-41d4-a716-446655440000"
+                    messages:
+                      - message_id: 1
+                        question: "What is a ROS 2 node?"
+                        answer: "A ROS 2 node is a process that performs computation..."
+                        cited_sources:
+                          - module_id: "module-1-ros2"
+                            chapter_id: "chapter-1"
+                            section_title: "Introduction to ROS 2 Nodes"
+                            url: "/docs/module-1-ros2/chapter-1#ros2-nodes"
+                            relevance_score: 0.92
+                        timestamp: "2025-12-16T10:30:45.123Z"
+                        response_time_ms: 1847
+                      - message_id: 2
+                        question: "How does it communicate?"
+                        answer: "Nodes communicate using topics, services, and actions..."
+                        cited_sources:
+                          - module_id: "module-1-ros2"
+                            chapter_id: "chapter-2"
+                            section_title: "Node Communication"
+                            url: "/docs/module-1-ros2/chapter-2#communication"
+                            relevance_score: 0.88
+                        timestamp: "2025-12-16T10:31:12.789Z"
+                        response_time_ms: 1623
+                      - message_id: 3
+                        question: "Show me an example"
+                        answer: "Here's a simple publisher node example..."
+                        cited_sources:
+                          - module_id: "module-1-ros2"
+                            chapter_id: "chapter-3"
+                            section_title: "Creating Publishers"
+                            url: "/docs/module-1-ros2/chapter-3#publisher-example"
+                            relevance_score: 0.91
+                        timestamp: "2025-12-16T10:32:05.456Z"
+                        response_time_ms: 1734
+                    total_messages: 3
+                    created_at: "2025-12-16T10:30:45.000Z"
+                    last_activity: "2025-12-16T10:32:05.456Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Session not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Session not found"
+                detail: "The requested session_id does not exist or has expired (>24 hours inactive)"
+                timestamp: "2025-12-16T10:35:00.000Z"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - health
+      summary: Health check endpoint
+      description: |
+        Returns the health status of the API and its dependencies.
+        Used for monitoring, load balancer health checks, and deployment verification.
+
+        **Status Codes**:
+        - `healthy`: All systems operational
+        - `degraded`: Some non-critical services unavailable (e.g., history disabled but Q&A works)
+        - `unhealthy`: Critical services down (e.g., OpenAI API unreachable)
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                allHealthy:
+                  summary: All services operational
+                  value:
+                    status: "healthy"
+                    timestamp: "2025-12-16T10:40:00.000Z"
+                    services:
+                      database:
+                        status: "healthy"
+                        latency_ms: 12
+                      qdrant:
+                        status: "healthy"
+                        latency_ms: 45
+                      openai:
+                        status: "configured"
+                    uptime_seconds: 86400
+                degradedService:
+                  summary: Database connection issue
+                  value:
+                    status: "degraded"
+                    timestamp: "2025-12-16T10:45:00.000Z"
+                    services:
+                      database:
+                        status: "unhealthy"
+                        error: "Connection timeout"
+                      qdrant:
+                        status: "healthy"
+                        latency_ms: 52
+                      openai:
+                        status: "configured"
+                    uptime_seconds: 90000
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "unhealthy"
+                timestamp: "2025-12-16T10:50:00.000Z"
+                services:
+                  database:
+                    status: "unhealthy"
+                    error: "Connection refused"
+                  qdrant:
+                    status: "unhealthy"
+                    error: "API unreachable"
+                  openai:
+                    status: "missing"
+                uptime_seconds: 95000
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Optional API key for additional rate limiting or access control.
+        Currently not enforced but reserved for future authentication.
+
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Student's question about textbook content
+          example: "What is a ROS 2 node?"
+        session_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            UUID of the conversation session.
+            - If null or omitted, a new session will be created.
+            - If provided, the question will be added to the existing conversation context.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    SelectedTextRequest:
+      type: object
+      required:
+        - question
+        - selected_text
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Student's question about the selected text
+          example: "What does the 10 parameter mean here?"
+        selected_text:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: |
+            Text highlighted by the student. Provides additional context for the answer.
+            **Max Length**: 5000 characters (truncated intelligently if exceeded)
+          example: "publisher = self.create_publisher(String, 'topic', 10)"
+        session_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID of the conversation session (same as ChatRequest)
+          example: null
+
+    ChatResponse:
+      type: object
+      required:
+        - answer
+        - sources
+        - session_id
+        - timestamp
+        - response_time_ms
+      properties:
+        answer:
+          type: string
+          description: AI-generated answer to the student's question
+          example: "A ROS 2 node is a process that performs computation. Nodes communicate with each other using topics, services, and actions."
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+          description: |
+            Array of source citations from the textbook.
+            **Constraint**: MUST include at least one citation for every answer.
+          minItems: 0
+          maxItems: 5
+        session_id:
+          type: string
+          format: uuid
+          description: UUID of the conversation session (existing or newly created)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the response
+          example: "2025-12-16T10:30:45.123Z"
+        response_time_ms:
+          type: integer
+          minimum: 0
+          description: Time taken to generate the response (milliseconds)
+          example: 1847
+
+    Citation:
+      type: object
+      required:
+        - module_id
+        - chapter_id
+        - section_title
+        - url
+      properties:
+        module_id:
+          type: string
+          description: Module identifier (e.g., "module-1-ros2")
+          example: "module-1-ros2"
+        chapter_id:
+          type: string
+          description: Chapter identifier (e.g., "chapter-1")
+          example: "chapter-1"
+        section_title:
+          type: string
+          description: Section heading for context
+          example: "Introduction to ROS 2 Nodes"
+        url:
+          type: string
+          format: uri
+          description: Relative URL to the cited chapter section
+          example: "/docs/module-1-ros2/chapter-1#ros2-nodes"
+        relevance_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: |
+            Cosine similarity score between question and chunk (0-1).
+            Higher scores indicate more relevant citations.
+          example: 0.92
+
+    HistoryResponse:
+      type: object
+      required:
+        - session_id
+        - messages
+        - total_messages
+        - created_at
+        - last_activity
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          description: UUID of the conversation session
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryMessage'
+          description: Array of messages in chronological order
+        total_messages:
+          type: integer
+          minimum: 0
+          description: Total number of messages in the session
+          example: 3
+        created_at:
+          type: string
+          format: date-time
+          description: Session creation timestamp
+          example: "2025-12-16T10:30:45.000Z"
+        last_activity:
+          type: string
+          format: date-time
+          description: Last message timestamp
+          example: "2025-12-16T10:32:05.456Z"
+
+    HistoryMessage:
+      type: object
+      required:
+        - message_id
+        - question
+        - answer
+        - cited_sources
+        - timestamp
+        - response_time_ms
+      properties:
+        message_id:
+          type: integer
+          description: Auto-incrementing message identifier
+          example: 1
+        question:
+          type: string
+          description: Student's original question
+          example: "What is a ROS 2 node?"
+        answer:
+          type: string
+          description: AI-generated answer
+          example: "A ROS 2 node is a process that performs computation..."
+        cited_sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+          description: Source citations for this answer
+        timestamp:
+          type: string
+          format: date-time
+          description: Message creation timestamp
+          example: "2025-12-16T10:30:45.123Z"
+        response_time_ms:
+          type: integer
+          minimum: 0
+          description: Time taken to generate this response (ms)
+          example: 1847
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+        - services
+        - uptime_seconds
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - unhealthy
+          description: Overall health status
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+          description: Current server timestamp
+          example: "2025-12-16T10:40:00.000Z"
+        services:
+          type: object
+          description: Health status of individual services
+          properties:
+            database:
+              $ref: '#/components/schemas/ServiceHealth'
+            qdrant:
+              $ref: '#/components/schemas/ServiceHealth'
+            openai:
+              $ref: '#/components/schemas/ServiceHealth'
+        uptime_seconds:
+          type: integer
+          minimum: 0
+          description: Server uptime in seconds
+          example: 86400
+
+    ServiceHealth:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - unhealthy
+            - configured
+            - missing
+          description: Service status
+          example: "healthy"
+        latency_ms:
+          type: integer
+          minimum: 0
+          description: Service response latency (if applicable)
+          example: 12
+        error:
+          type: string
+          nullable: true
+          description: Error message if unhealthy
+          example: null
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "Invalid request"
+        detail:
+          type: string
+          nullable: true
+          description: Additional error details
+          example: "Question length exceeds 1000 characters"
+        timestamp:
+          type: string
+          format: date-time
+          description: Error occurrence timestamp
+          example: "2025-12-16T10:35:00.000Z"
+
+  responses:
+    BadRequest:
+      description: Invalid request (validation error)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            questionTooLong:
+              summary: Question exceeds max length
+              value:
+                error: "Validation error"
+                detail: "Question length must be <= 1000 characters"
+                timestamp: "2025-12-16T10:35:00.000Z"
+            invalidSessionId:
+              summary: Malformed UUID
+              value:
+                error: "Validation error"
+                detail: "session_id must be a valid UUID"
+                timestamp: "2025-12-16T10:36:00.000Z"
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          description: Request limit per time window
+          schema:
+            type: integer
+          example: 10
+        X-RateLimit-Remaining:
+          description: Remaining requests in current window
+          schema:
+            type: integer
+          example: 0
+        X-RateLimit-Reset:
+          description: Unix timestamp when rate limit resets
+          schema:
+            type: integer
+          example: 1703068800
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+          example: 60
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            sessionLimit:
+              summary: Session rate limit exceeded
+              value:
+                error: "Rate limit exceeded"
+                detail: "Too many requests from this session. Please wait 60 seconds."
+                timestamp: "2025-12-16T10:37:00.000Z"
+            ipLimit:
+              summary: IP rate limit exceeded
+              value:
+                error: "Rate limit exceeded"
+                detail: "Too many requests from this IP address. Please wait before retrying."
+                timestamp: "2025-12-16T10:38:00.000Z"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Internal server error"
+            detail: "An unexpected error occurred. Our team has been notified."
+            timestamp: "2025-12-16T10:39:00.000Z"
+
+    ServiceUnavailable:
+      description: Service temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            qdrantDown:
+              summary: Vector search unavailable
+              value:
+                error: "Service unavailable"
+                detail: "Vector search is temporarily unavailable. Please try again shortly."
+                timestamp: "2025-12-16T10:40:00.000Z"
+            openaiDown:
+              summary: OpenAI API unavailable
+              value:
+                error: "Service unavailable"
+                detail: "AI generation service is temporarily unavailable. Please try again shortly."
+                timestamp: "2025-12-16T10:41:00.000Z"

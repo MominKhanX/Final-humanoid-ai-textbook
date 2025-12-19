@@ -1,0 +1,312 @@
+# API Contract: NeuroBot Textbook Content API
+
+**Feature**: 001-docusaurus-init
+**Version**: 1.0
+**Date**: 2025-12-15
+
+## Overview
+
+This contract defines the content API endpoints for the NeuroBot Docusaurus textbook. These endpoints will be implemented in future features to support the RAG chatbot and dynamic content features. This initial contract establishes the foundation for content retrieval and search functionality.
+
+## Base URL
+
+```
+https://mominkhanx.github.io/neurobot-textbook/api
+```
+
+Note: For static site deployment, these endpoints will be implemented as client-side JavaScript functions that query the static content or external services.
+
+## Content Retrieval Endpoints
+
+### GET /modules
+
+Retrieve a list of all available modules in the textbook.
+
+#### Request
+
+```
+GET /modules
+Content-Type: application/json
+```
+
+#### Response
+
+**Success Response (200 OK)**
+
+```json
+{
+  "modules": [
+    {
+      "id": "introduction",
+      "title": "Introduction to Physical AI",
+      "description": "Overview of Physical AI and humanoid robotics concepts",
+      "position": 1,
+      "chapterCount": 3,
+      "slug": "introduction"
+    },
+    {
+      "id": "module-1-ros2",
+      "title": "The Robotic Nervous System (ROS 2)",
+      "description": "ROS 2 architecture and implementation",
+      "position": 2,
+      "chapterCount": 5,
+      "slug": "module-1-ros2"
+    },
+    {
+      "id": "module-2-digital-twin",
+      "title": "The Digital Twin (Gazebo & Unity)",
+      "description": "Simulation environments and digital twins",
+      "position": 3,
+      "chapterCount": 4,
+      "slug": "module-2-digital-twin"
+    },
+    {
+      "id": "module-3-nvidia-isaac",
+      "title": "The AI-Robot Brain (NVIDIA Isaac™)",
+      "description": "AI-powered robotics with NVIDIA Isaac",
+      "position": 4,
+      "chapterCount": 5,
+      "slug": "module-3-nvidia-isaac"
+    },
+    {
+      "id": "module-4-vla",
+      "title": "Vision-Language-Action (VLA)",
+      "description": "Multimodal AI for robotics",
+      "position": 5,
+      "chapterCount": 5,
+      "slug": "module-4-vla"
+    }
+  ],
+  "totalModules": 5
+}
+```
+
+#### Error Responses
+
+- `500 Internal Server Error`: If content cannot be loaded
+
+### GET /modules/{moduleId}
+
+Retrieve detailed information about a specific module and its chapters.
+
+#### Path Parameters
+
+| Parameter | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| moduleId  | string | Yes      | Unique identifier of the module |
+
+#### Request
+
+```
+GET /modules/{moduleId}
+Content-Type: application/json
+```
+
+#### Response
+
+**Success Response (200 OK)**
+
+```json
+{
+  "module": {
+    "id": "module-1-ros2",
+    "title": "The Robotic Nervous System (ROS 2)",
+    "description": "ROS 2 architecture and implementation",
+    "position": 2,
+    "chapterCount": 5,
+    "slug": "module-1-ros2",
+    "chapters": [
+      {
+        "id": "ros2-chapter-1",
+        "title": "Introduction to ROS 2 Architecture",
+        "description": "Understanding ROS 2 nodes, topics, and services",
+        "sidebar_position": 1,
+        "estimated_reading_time": 15,
+        "slug": "chapter-1"
+      },
+      {
+        "id": "ros2-chapter-2",
+        "title": "Nodes, Topics, and Services",
+        "description": "Core communication patterns in ROS 2",
+        "sidebar_position": 2,
+        "estimated_reading_time": 20,
+        "slug": "chapter-2"
+      }
+    ]
+  }
+}
+```
+
+#### Error Responses
+
+- `404 Not Found`: If module with given ID does not exist
+- `500 Internal Server Error`: If content cannot be loaded
+
+### GET /chapters/{chapterId}
+
+Retrieve content and metadata for a specific chapter.
+
+#### Path Parameters
+
+| Parameter | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| chapterId | string | Yes      | Unique identifier of the chapter |
+
+#### Request
+
+```
+GET /chapters/{chapterId}
+Content-Type: application/json
+```
+
+#### Response
+
+**Success Response (200 OK)**
+
+```json
+{
+  "chapter": {
+    "id": "ros2-chapter-1",
+    "title": "Introduction to ROS 2 Architecture",
+    "description": "Understanding ROS 2 nodes, topics, and services",
+    "module_id": "module-1-ros2",
+    "sidebar_position": 1,
+    "estimated_reading_time": 15,
+    "learning_objectives": [
+      "Understand the basic concepts of ROS 2",
+      "Identify the main components of ROS 2 architecture",
+      "Compare ROS 1 and ROS 2"
+    ],
+    "prerequisites": [
+      "Basic understanding of robotics concepts",
+      "Familiarity with command line interface"
+    ],
+    "content_preview": "ROS 2 (Robot Operating System 2) is a flexible framework for writing robot software...",
+    "slug": "chapter-1",
+    "last_updated": "2025-12-15T10:30:00Z"
+  }
+}
+```
+
+#### Error Responses
+
+- `404 Not Found`: If chapter with given ID does not exist
+- `500 Internal Server Error`: If content cannot be loaded
+
+### GET /search
+
+Search across all textbook content.
+
+#### Query Parameters
+
+| Parameter | Type   | Required | Default | Description |
+|-----------|--------|----------|---------|-------------|
+| q         | string | Yes      | -       | Search query string |
+| limit     | number | No       | 10      | Maximum number of results to return |
+| offset    | number | No       | 0       | Number of results to skip for pagination |
+
+#### Request
+
+```
+GET /search?q=ROS+architecture&limit=5&offset=0
+Content-Type: application/json
+```
+
+#### Response
+
+**Success Response (200 OK)**
+
+```json
+{
+  "query": "ROS architecture",
+  "totalResults": 12,
+  "results": [
+    {
+      "id": "ros2-chapter-1",
+      "title": "Introduction to ROS 2 Architecture",
+      "description": "Understanding ROS 2 nodes, topics, and services",
+      "module": {
+        "id": "module-1-ros2",
+        "title": "The Robotic Nervous System (ROS 2)"
+      },
+      "relevance": 0.95,
+      "preview": "ROS 2 (Robot Operating System 2) is a flexible framework for writing robot software. It is a collection of software libraries and tools that help you build robot applications...",
+      "url": "/docs/module-1-ros2/chapter-1"
+    }
+  ],
+  "limit": 5,
+  "offset": 0
+}
+```
+
+#### Error Responses
+
+- `400 Bad Request`: If query parameter is missing or invalid
+- `500 Internal Server Error`: If search service is unavailable
+
+## Content Update Notification Endpoint
+
+### POST /webhooks/content-updated
+
+Receive notifications when content is updated (for cache invalidation or search index updates).
+
+#### Request
+
+```
+POST /webhooks/content-updated
+Content-Type: application/json
+Authorization: Bearer {webhook_secret}
+
+{
+  "event": "content.updated",
+  "timestamp": "2025-12-15T10:30:00Z",
+  "content_type": "chapter",
+  "content_id": "ros2-chapter-1",
+  "content_path": "docs/module-1-ros2/chapter-1.mdx"
+}
+```
+
+#### Response
+
+**Success Response (200 OK)**
+
+```json
+{
+  "status": "processed",
+  "processed_at": "2025-12-15T10:30:05Z"
+}
+```
+
+## Error Response Format
+
+All error responses follow this format:
+
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable error message",
+    "details": "Additional error details if applicable"
+  }
+}
+```
+
+## Rate Limiting
+
+All endpoints are subject to rate limiting:
+- 100 requests per minute per IP address
+- 429 Too Many Requests response when limit is exceeded
+
+## Authentication
+
+Most content endpoints are public. Some administrative endpoints may require authentication:
+- Use Bearer token in Authorization header: `Authorization: Bearer {token}`
+- Tokens are valid for 24 hours
+- Refresh tokens available via POST /auth/refresh
+
+## Versioning
+
+API versioning is done via URL path:
+- Current version: `/api/v1/`
+- Future versions: `/api/v2/`, etc.
+- Breaking changes will be announced 30 days in advance

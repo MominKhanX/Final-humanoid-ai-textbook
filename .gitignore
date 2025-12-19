@@ -1,0 +1,45 @@
+# Root - Old/Test/Junk Files
+CHAPTER_SETUP_COMPLETE.md
+COMPLETION_SUMMARY.md
+nul
+organize_chapters.py
+PROJECT_SUMMARY.md
+setup_chapters.py
+SETUP_COMPLETE.md
+test_chat.*
+test_module1_chat.*
+test_tf2_chat.*
+validate-build.bat
+.github/
+
+# Backend - Local/Generated
+backend/logs/
+backend/install_windows.bat
+backend/list_models.py
+backend/test_gemini.py
+
+# Node.js/TypeScript
+node_modules/
+dist/
+build/
+*.log
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+
+# Docusaurus
+.docusaurus/
+.cache/

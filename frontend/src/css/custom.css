@@ -1,0 +1,1931 @@
+/**
+ * NeuroBot Royal Indigo Academic Theme
+ * Professional styling for market-level AI textbook
+ */
+
+:root {
+  /* NeuroBot Color System */
+  --neurobot-bg-primary: #0d1117;
+  --neurobot-bg-secondary: #161b22;
+  --neurobot-bg-tertiary: #21262d;
+
+  --neurobot-indigo-start: #2d3561;
+  --neurobot-indigo-mid: #3d4675;
+  --neurobot-indigo-end: #4a5f8f;
+
+  --neurobot-accent-primary: #5b7ec8;
+  --neurobot-accent-glow: #7a9ae0;
+  --neurobot-accent-muted: #4a6399;
+
+  --neurobot-text-primary: #ffffff;
+  --neurobot-text-secondary: #e6edf3;
+  --neurobot-text-tertiary: #8b949e;
+  --neurobot-text-quote: #a5b4c7;
+
+  --neurobot-border-default: rgba(91, 126, 200, 0.15);
+  --neurobot-border-accent: rgba(91, 126, 200, 0.4);
+  --neurobot-shadow-sm: rgba(45, 53, 97, 0.3);
+  --neurobot-shadow-lg: rgba(45, 53, 97, 0.6);
+
+  --neurobot-font-serif: 'Georgia', 'Times New Roman', serif;
+  --neurobot-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', sans-serif;
+  --neurobot-font-mono: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+
+  /* Docusaurus Integration */
+  --ifm-color-primary: #5b7ec8;
+  --ifm-color-primary-dark: #4a6bb5;
+  --ifm-color-primary-darker: #4263a8;
+  --ifm-color-primary-darkest: #354f8a;
+  --ifm-color-primary-light: #7091d4;
+  --ifm-color-primary-lighter: #7f9cd9;
+  --ifm-color-primary-lightest: #a4b8e6;
+
+  --ifm-background-color: #0d1117;
+  --ifm-background-surface-color: #161b22;
+  --ifm-navbar-background-color: rgba(13, 17, 23, 0.95);
+  --ifm-footer-background-color: #161b22;
+  --ifm-card-background-color: #21262d;
+
+  --ifm-font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', sans-serif;
+  --ifm-heading-font-family: 'Georgia', 'Times New Roman', serif;
+  --ifm-font-color-base: #e6edf3;
+  --ifm-heading-color: #ffffff;
+  --ifm-font-size-base: 17px;
+  --ifm-line-height-base: 1.7;
+
+  --ifm-link-color: #5b7ec8;
+  --ifm-link-hover-color: #7a9ae0;
+  --ifm-link-decoration: none;
+
+  --ifm-code-font-size: 0.9375rem;
+  --ifm-code-background: #161b22;
+  --ifm-code-border-radius: 4px;
+  --ifm-pre-background: #161b22;
+
+  --ifm-color-emphasis-300: rgba(91, 126, 200, 0.15);
+  --ifm-hr-background-color: rgba(91, 126, 200, 0.2);
+
+  --ifm-spacing-horizontal: 1.5rem;
+  --ifm-spacing-vertical: 1.5rem;
+}
+
+[data-theme='dark'] {
+  --ifm-background-color: #0d1117;
+  --ifm-background-surface-color: #161b22;
+}
+
+[data-theme='light'] {
+  /* Light Mode - Elegant Scholarly Theme */
+  --neurobot-bg-primary: #f8f9fb;
+  --neurobot-bg-secondary: #ffffff;
+  --neurobot-bg-tertiary: #ffffff;
+
+  --neurobot-indigo-start: #2d3561;
+  --neurobot-indigo-mid: #3d4675;
+  --neurobot-indigo-end: #4a5f8f;
+
+  --neurobot-accent-primary: #2d3561;
+  --neurobot-accent-glow: #4a5f8f;
+  --neurobot-accent-muted: #5b7ec8;
+
+  --neurobot-text-primary: #0d1117;
+  --neurobot-text-secondary: #161b22;
+  --neurobot-text-tertiary: #57606a;
+  --neurobot-text-quote: #3d4675;
+
+  --neurobot-border-default: rgba(45, 53, 97, 0.15);
+  --neurobot-border-accent: rgba(45, 53, 97, 0.3);
+  --neurobot-shadow-sm: rgba(45, 53, 97, 0.08);
+  --neurobot-shadow-lg: rgba(45, 53, 97, 0.15);
+
+  /* Docusaurus Integration for Light Mode */
+  --ifm-color-primary: #2d3561;
+  --ifm-color-primary-dark: #263048;
+  --ifm-color-primary-darker: #232d43;
+  --ifm-color-primary-darkest: #1d2537;
+  --ifm-color-primary-light: #3d4675;
+  --ifm-color-primary-lighter: #4a5f8f;
+  --ifm-color-primary-lightest: #5b7ec8;
+
+  --ifm-background-color: #f8f9fb;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-navbar-background-color: rgba(255, 255, 255, 0.95);
+  --ifm-footer-background-color: #ffffff;
+  --ifm-card-background-color: #ffffff;
+
+  --ifm-font-color-base: #161b22;
+  --ifm-heading-color: #0d1117;
+
+  --ifm-link-color: #2d3561;
+  --ifm-link-hover-color: #4a5f8f;
+
+  --ifm-code-background: #f3f4f6;
+  --ifm-pre-background: #f8f9fb;
+
+  --ifm-color-emphasis-300: rgba(45, 53, 97, 0.1);
+  --ifm-hr-background-color: rgba(45, 53, 97, 0.15);
+}
+
+/* Navigation Bar */
+.navbar {
+  background: rgba(13, 17, 23, 0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(91, 126, 200, 0.1);
+  padding: 0.75rem 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.navbar__brand {
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+
+.navbar__brand:hover {
+  transform: scale(1.05);
+}
+
+.navbar__title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: white;
+}
+
+.navbar__link {
+  position: relative;
+  color: var(--ifm-font-color-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  padding-bottom: 0.25rem;
+}
+
+.navbar__link:hover {
+  color: var(--ifm-color-primary);
+}
+
+.navbar__link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  height: 2px;
+  background: var(--ifm-color-primary);
+  transition: width 0.3s ease;
+}
+
+.navbar__link:hover::after,
+.navbar__link--active::after {
+  width: 100%;
+}
+
+/* Sign Up Button */
+.neurobot-signup-button {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  color: white !important;
+  font-family: var(--neurobot-font-serif) !important;
+  font-size: 0.9375rem !important;
+  font-weight: 600 !important;
+  padding: 0.625rem 1.5rem !important;
+  border-radius: 6px !important;
+  cursor: pointer;
+  transition: all 0.3s ease !important;
+  box-shadow: 0 2px 8px rgba(45, 53, 97, 0.3);
+  margin-left: 1rem !important;
+  text-decoration: none !important;
+}
+
+.neurobot-signup-button:hover {
+  transform: scale(1.05) !important;
+  box-shadow: 0 4px 16px rgba(45, 53, 97, 0.6) !important;
+  color: white !important;
+  text-decoration: none !important;
+}
+
+.neurobot-signup-button::after {
+  display: none !important;
+}
+
+/* Start Reading Button */
+.neurobot-start-reading-button {
+  background: transparent !important;
+  border: 2px solid var(--neurobot-accent-primary) !important;
+  color: var(--neurobot-accent-primary) !important;
+  font-family: var(--neurobot-font-serif) !important;
+  font-size: 0.9375rem !important;
+  font-weight: 600 !important;
+  padding: 0.625rem 1.5rem !important;
+  border-radius: 6px !important;
+  cursor: pointer;
+  transition: all 0.3s ease !important;
+  margin-left: 1rem !important;
+  text-decoration: none !important;
+}
+
+.neurobot-start-reading-button:hover {
+  background: rgba(91, 126, 200, 0.15) !important;
+  transform: scale(1.05) !important;
+  color: var(--neurobot-accent-primary) !important;
+  text-decoration: none !important;
+}
+
+.neurobot-start-reading-button::after {
+  display: none !important;
+}
+
+/* Hide "Start Reading" button on desktop - only show in mobile */
+@media (min-width: 997px) {
+  .neurobot-start-reading-button {
+    display: none !important;
+  }
+}
+
+/* Mobile Navigation - Royal Indigo Theme */
+
+/* Hamburger Menu Icon */
+.navbar__toggle {
+  display: none;
+  color: var(--ifm-navbar-link-color);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.navbar__toggle:hover {
+  color: var(--neurobot-accent-primary);
+  background: rgba(91, 126, 200, 0.1);
+  transform: scale(1.1);
+}
+
+.navbar__toggle svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Show hamburger on mobile */
+@media (max-width: 996px) {
+  .navbar__toggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Hide all navbar items on mobile (they go in sidebar) */
+  .navbar__items--right > * {
+    display: none;
+  }
+
+  /* Keep signup button visible in top navbar on mobile too */
+  .navbar__items--right > .neurobot-signup-button {
+    display: inline-block !important;
+  }
+}
+
+/* Mobile Sidebar Menu */
+.navbar-sidebar {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  width: 300px;
+  height: 100vh;
+  background: #0d1117 !important;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease;
+  overflow-y: auto;
+}
+
+.navbar-sidebar--show {
+  transform: translateX(0) !important;
+}
+
+/* Sidebar Brand/Header */
+.navbar-sidebar__brand {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  border-bottom: 1px solid rgba(91, 126, 200, 0.3) !important;
+  padding: 1.5rem !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.navbar-sidebar__brand .navbar__brand {
+  flex: 1;
+}
+
+.navbar-sidebar__brand .navbar__title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: white;
+}
+
+/* Close Button */
+.navbar-sidebar__close {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.75rem;
+  cursor: pointer;
+  padding: 0.25rem;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+}
+
+.navbar-sidebar__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: rotate(90deg);
+}
+
+/* Sidebar Items Container */
+.navbar-sidebar__items {
+  padding: 1.5rem 1rem !important;
+}
+
+.navbar-sidebar__item {
+  margin-bottom: 0.5rem;
+}
+
+/* Hide doc sidebar content in mobile navbar - only show navbar items */
+.navbar-sidebar .theme-doc-sidebar-container,
+.navbar-sidebar .theme-doc-sidebar-menu {
+  display: none !important;
+}
+
+/* Hide doc menu list but keep navbar menu visible */
+.navbar-sidebar .menu__list:not(.navbar__items) {
+  display: none !important;
+}
+
+/* Ensure navbar items container is visible in sidebar */
+.navbar-sidebar .navbar__items,
+.navbar-sidebar .navbar__item {
+  display: block !important;
+}
+
+/* Sidebar Links */
+.navbar-sidebar .menu__link,
+.navbar-sidebar .navbar__link {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.0625rem;
+  font-weight: 500;
+  color: var(--neurobot-text-secondary) !important;
+  padding: 1rem 1.25rem !important;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  transition: all 0.3s ease;
+  display: block;
+  text-decoration: none;
+}
+
+.navbar-sidebar .menu__link:hover,
+.navbar-sidebar .navbar__link:hover {
+  background: rgba(91, 126, 200, 0.1) !important;
+  border-left-color: var(--neurobot-accent-primary);
+  color: var(--neurobot-accent-primary) !important;
+  transform: translateX(4px);
+}
+
+.navbar-sidebar .menu__link--active,
+.navbar-sidebar .navbar__link--active {
+  background: rgba(91, 126, 200, 0.15) !important;
+  border-left-color: #5b7ec8 !important;
+  color: #5b7ec8 !important;
+  font-weight: 600;
+}
+
+/* Sign Up Button in Mobile Menu */
+.navbar-sidebar .neurobot-signup-button {
+  display: block !important;
+  width: calc(100% - 2.5rem) !important;
+  text-align: center;
+  margin: 1rem 1.25rem !important;
+  padding: 0.875rem 1.5rem !important;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  border: none !important;
+  color: white !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 4px 12px rgba(45, 53, 97, 0.4);
+  transition: all 0.3s ease;
+}
+
+.navbar-sidebar .neurobot-signup-button:hover {
+  transform: scale(1.02) !important;
+  box-shadow: 0 6px 16px rgba(45, 53, 97, 0.6) !important;
+}
+
+/* Start Reading Button in Mobile Menu - Prominent styling */
+.navbar-sidebar .neurobot-start-reading-button {
+  width: 100%;
+  text-align: center;
+  margin: 1.5rem 0 !important;
+  padding: 1rem 1.5rem !important;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  border: none !important;
+  color: white !important;
+  font-size: 1.0625rem !important;
+  font-weight: 600 !important;
+  box-shadow: 0 4px 12px rgba(45, 53, 97, 0.4);
+  border-left: 3px solid transparent !important;
+}
+
+.navbar-sidebar .neurobot-start-reading-button:hover {
+  background: linear-gradient(135deg, #3d4571 0%, #5a6f9f 100%) !important;
+  transform: scale(1.03) !important;
+  box-shadow: 0 6px 20px rgba(45, 53, 97, 0.6) !important;
+  color: white !important;
+}
+
+/* Mobile Menu Overlay */
+.navbar-sidebar__backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 9998;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.navbar-sidebar__backdrop--show {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Color Mode Toggle in Mobile Menu */
+.navbar-sidebar .navbar__items {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.navbar-sidebar .react-toggle {
+  margin: 1rem 1.25rem;
+}
+
+/* Mobile Menu Scrollbar */
+.navbar-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.navbar-sidebar::-webkit-scrollbar-track {
+  background: rgba(91, 126, 200, 0.05);
+}
+
+.navbar-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(91, 126, 200, 0.3);
+  border-radius: 3px;
+}
+
+.navbar-sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 126, 200, 0.5);
+}
+
+@media (max-width: 996px) {
+  .navbar__items {
+    gap: 0.5rem;
+  }
+
+  .neurobot-signup-button {
+    margin-left: 0.5rem !important;
+    padding: 0.5rem 1rem !important;
+    font-size: 0.875rem !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 0.75rem 1rem;
+  }
+
+  .navbar__title {
+    font-size: 1.125rem;
+  }
+}
+
+/* Sidebar */
+.menu {
+  padding: 1rem;
+}
+
+.menu__link {
+  color: var(--ifm-font-color-base);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0.5rem 0.75rem;
+}
+
+.menu__link:hover {
+  background: rgba(91, 126, 200, 0.1);
+  color: var(--ifm-color-primary);
+}
+
+.menu__link--active {
+  background: rgba(91, 126, 200, 0.15);
+  color: var(--ifm-color-primary);
+  font-weight: 600;
+  border-left: 3px solid var(--ifm-color-primary);
+  padding-left: calc(0.75rem - 3px);
+}
+
+.menu__list-item-collapsible:hover {
+  background: rgba(91, 126, 200, 0.05);
+}
+
+/* Table of Contents */
+.table-of-contents {
+  border-left: 2px solid rgba(91, 126, 200, 0.2);
+  padding-left: 0;
+}
+
+.table-of-contents__link {
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: block;
+  padding: 0.25rem 0 0.25rem 1rem;
+  border-left: 2px solid transparent;
+  margin-left: -2px;
+}
+
+.table-of-contents__link:hover {
+  color: var(--ifm-color-primary);
+  border-left-color: var(--ifm-color-primary);
+  background: rgba(91, 126, 200, 0.05);
+}
+
+.table-of-contents__link--active {
+  color: var(--ifm-color-primary);
+  font-weight: 600;
+  border-left-color: var(--ifm-color-primary);
+}
+
+/* Documentation Content */
+.markdown {
+  color: var(--ifm-font-color-base);
+  font-size: var(--ifm-font-size-base);
+  line-height: var(--ifm-line-height-base);
+}
+
+.markdown > h1,
+.markdown > h2,
+.markdown > h3,
+.markdown > h4 {
+  font-family: var(--neurobot-font-serif);
+  color: var(--ifm-heading-color);
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+.markdown > h1 {
+  font-size: 2.5rem;
+  border-bottom: 2px solid rgba(91, 126, 200, 0.2);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.markdown > h2 {
+  font-size: 2rem;
+  border-bottom: 1px solid rgba(91, 126, 200, 0.15);
+  padding-bottom: 0.5rem;
+}
+
+.markdown > h2::before {
+  content: "◆ ";
+  color: var(--neurobot-accent-primary);
+  margin-right: 0.5em;
+}
+
+.markdown > h3 {
+  font-size: 1.5rem;
+}
+
+/* Inline code */
+.markdown code {
+  background: var(--ifm-code-background);
+  color: var(--ifm-color-primary);
+  border: 1px solid rgba(91, 126, 200, 0.2);
+  border-radius: var(--ifm-code-border-radius);
+  padding: 0.2rem 0.4rem;
+  font-size: 0.9em;
+}
+
+/* Code blocks */
+.prism-code,
+.codeBlockContainer {
+  background: var(--ifm-pre-background) !important;
+  border: 1px solid rgba(91, 126, 200, 0.15);
+  border-radius: 8px;
+  border-left: 4px solid var(--ifm-color-primary);
+}
+
+.codeBlockTitle {
+  background: rgba(45, 53, 97, 0.3);
+  color: var(--ifm-color-primary);
+  border-bottom: 1px solid rgba(91, 126, 200, 0.2);
+  font-family: var(--neurobot-font-mono);
+}
+
+/* Blockquotes */
+.markdown blockquote {
+  border-left: 4px solid var(--ifm-color-primary);
+  background: rgba(45, 53, 97, 0.1);
+  color: var(--neurobot-text-quote);
+  padding: 1rem 1.5rem;
+  margin: 1.5rem 0;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Admonitions */
+.admonition {
+  border-left: 4px solid var(--ifm-color-primary);
+  border-radius: 0 6px 6px 0;
+  background: rgba(45, 53, 97, 0.1);
+}
+
+.admonition-heading {
+  font-family: var(--neurobot-font-serif);
+}
+
+/* Tables */
+.markdown table {
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+}
+
+.markdown th {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  color: white;
+  font-family: var(--neurobot-font-serif);
+  font-weight: 600;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(91, 126, 200, 0.3);
+}
+
+.markdown td {
+  background: var(--ifm-card-background-color);
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(91, 126, 200, 0.15);
+}
+
+.markdown tr:hover td {
+  background: rgba(91, 126, 200, 0.05);
+}
+
+/* Pagination */
+.pagination-nav__link {
+  border: 1px solid rgba(91, 126, 200, 0.2);
+  border-left: 4px solid var(--ifm-color-primary);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.pagination-nav__link:hover {
+  background: rgba(91, 126, 200, 0.1);
+  border-color: var(--ifm-color-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(45, 53, 97, 0.3);
+}
+
+.pagination-nav__label {
+  font-family: var(--neurobot-font-serif);
+  color: var(--ifm-color-primary);
+}
+
+/* Footer */
+.footer {
+  background: var(--ifm-footer-background-color);
+  border-top: 1px solid rgba(91, 126, 200, 0.2);
+  padding: 2rem 0;
+}
+
+.footer__title {
+  font-family: var(--neurobot-font-serif);
+  color: white;
+  font-size: 1.125rem;
+}
+
+.footer__link-item {
+  color: var(--ifm-color-emphasis-700);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.footer__link-item:hover {
+  color: var(--ifm-color-primary);
+  text-decoration: underline;
+}
+
+/* Hero Section */
+.neurobot-hero {
+  background: linear-gradient(180deg, #0d1117 0%, #161b22 50%, #21262d 100%);
+  padding: 5rem 2rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.neurobot-hero::before {
+  content: '01';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--neurobot-font-serif);
+  font-size: 20rem;
+  font-weight: 700;
+  color: rgba(91, 126, 200, 0.03);
+  z-index: 0;
+  line-height: 1;
+}
+
+.neurobot-hero-content {
+  position: relative;
+  z-index: 1;
+}
+
+.neurobot-hero-badge {
+  display: inline-block;
+  background: rgba(45, 53, 97, 0.3);
+  border: 1px solid var(--neurobot-accent-primary);
+  color: var(--neurobot-accent-primary);
+  font-family: var(--neurobot-font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.5rem 1.25rem;
+  border-radius: 20px;
+  margin-bottom: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.neurobot-hero-title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 1rem;
+  line-height: 1.2;
+}
+
+.neurobot-hero-title .highlight {
+  background: linear-gradient(135deg, #2d3561 0%, #5b7ec8 50%, #4a5f8f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.neurobot-hero-subtitle {
+  font-family: var(--neurobot-font-sans);
+  font-size: 1.25rem;
+  color: var(--neurobot-text-tertiary);
+  max-width: 700px;
+  margin: 0 auto 2.5rem;
+  line-height: 1.6;
+}
+
+.neurobot-hero-cta {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.neurobot-btn-primary {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  color: white;
+  font-family: var(--neurobot-font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.875rem 2rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px var(--neurobot-shadow-sm);
+  text-decoration: none;
+  display: inline-block;
+}
+
+.neurobot-btn-primary:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 16px var(--neurobot-shadow-lg);
+  color: white;
+  text-decoration: none;
+}
+
+.neurobot-btn-secondary {
+  background: transparent;
+  color: var(--neurobot-accent-primary);
+  font-family: var(--neurobot-font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.875rem 2rem;
+  border: 2px solid var(--neurobot-accent-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.neurobot-btn-secondary:hover {
+  background: rgba(91, 126, 200, 0.1);
+  transform: scale(1.03);
+  box-shadow: 0 0 20px rgba(91, 126, 200, 0.2);
+  color: var(--neurobot-accent-primary);
+  text-decoration: none;
+}
+
+/* Diamond Separator */
+.neurobot-diamond-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 3rem 0;
+  color: var(--neurobot-accent-primary);
+  font-size: 1.25rem;
+  opacity: 0.6;
+}
+
+.neurobot-diamond-separator::before,
+.neurobot-diamond-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--neurobot-border-accent), transparent);
+  margin: 0 1.5rem;
+}
+
+/* RAG Chatbot Widget */
+.neurobot-chatbot {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 400px;
+  max-height: 600px;
+  background: var(--neurobot-bg-secondary);
+  border: 1px solid var(--neurobot-border-accent);
+  border-left: 4px solid var(--neurobot-accent-primary);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px var(--neurobot-shadow-lg);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.neurobot-chatbot.hidden {
+  display: none;
+}
+
+.neurobot-chatbot-header {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--neurobot-border-accent);
+}
+
+.neurobot-chatbot-title-container {
+  flex: 1;
+}
+
+.neurobot-chatbot-title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: white;
+  margin: 0;
+}
+
+.neurobot-chatbot-subtitle {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 0.25rem;
+}
+
+.neurobot-chatbot-close {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem;
+  transition: all 0.2s ease;
+}
+
+.neurobot-chatbot-close:hover {
+  transform: scale(1.1);
+  color: var(--neurobot-accent-glow);
+}
+
+.neurobot-chatbot-messages {
+  flex: 1;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: var(--neurobot-bg-primary);
+}
+
+.neurobot-message {
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.neurobot-message-user {
+  align-items: flex-end;
+}
+
+.neurobot-message-assistant {
+  align-items: flex-start;
+}
+
+.neurobot-message-bubble {
+  max-width: 80%;
+  padding: 0.875rem 1.25rem;
+  border-radius: 12px;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.neurobot-message-user .neurobot-message-bubble {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.neurobot-message-assistant .neurobot-message-bubble {
+  background: var(--neurobot-bg-tertiary);
+  color: var(--neurobot-text-secondary);
+  border: 1px solid var(--neurobot-border-default);
+  border-left: 3px solid var(--neurobot-accent-primary);
+  border-bottom-left-radius: 4px;
+}
+
+.neurobot-citation {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  background: rgba(91, 126, 200, 0.15);
+  border: 1px solid var(--neurobot-accent-primary);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--neurobot-accent-primary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.neurobot-citation:hover {
+  background: rgba(91, 126, 200, 0.25);
+  transform: scale(1.05);
+}
+
+.neurobot-message-time {
+  font-size: 0.6875rem;
+  color: var(--neurobot-text-tertiary);
+  margin-top: 0.25rem;
+}
+
+.neurobot-chatbot-input {
+  padding: 1rem 1.5rem;
+  background: var(--neurobot-bg-secondary);
+  border-top: 1px solid var(--neurobot-border-default);
+}
+
+.neurobot-input-wrapper {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.neurobot-input-field {
+  flex: 1;
+  background: var(--neurobot-bg-primary);
+  border: 1px solid var(--neurobot-border-default);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: var(--neurobot-text-secondary);
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+}
+
+.neurobot-input-field:focus {
+  outline: none;
+  border-color: var(--neurobot-accent-primary);
+  box-shadow: 0 0 0 3px rgba(91, 126, 200, 0.1);
+}
+
+.neurobot-input-field::placeholder {
+  color: var(--neurobot-text-tertiary);
+}
+
+.neurobot-send-button {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  border: none;
+  border-radius: 8px;
+  padding: 0.75rem 1.25rem;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.neurobot-send-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px var(--neurobot-shadow-sm);
+}
+
+.neurobot-send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.neurobot-chatbot-toggle {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 60px;
+  height: 60px;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  border: 2px solid var(--neurobot-accent-primary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px var(--neurobot-shadow-lg);
+  transition: all 0.3s ease;
+  z-index: 999;
+}
+
+.neurobot-chatbot-toggle.hidden {
+  display: none;
+}
+
+.neurobot-chatbot-toggle:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 24px var(--neurobot-shadow-lg);
+}
+
+.neurobot-chatbot-toggle-icon {
+  font-size: 1.75rem;
+  color: white;
+}
+
+.neurobot-typing-indicator {
+  display: flex;
+  gap: 0.375rem;
+  padding: 0.875rem 1.25rem;
+  background: var(--neurobot-bg-tertiary);
+  border: 1px solid var(--neurobot-border-default);
+  border-left: 3px solid var(--neurobot-accent-primary);
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  max-width: fit-content;
+}
+
+.neurobot-typing-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--neurobot-accent-primary);
+  border-radius: 50%;
+  animation: typing 1.4s infinite;
+}
+
+.neurobot-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.neurobot-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .neurobot-hero-title {
+    font-size: 2.25rem;
+  }
+
+  .neurobot-hero {
+    padding: 3rem 1.5rem;
+  }
+
+  .neurobot-hero::before {
+    font-size: 10rem;
+  }
+
+  .neurobot-chatbot {
+    width: calc(100vw - 2rem);
+    max-height: calc(100vh - 4rem);
+    right: 1rem;
+    bottom: 1rem;
+  }
+
+  .neurobot-chatbot-toggle {
+    right: 1rem;
+    bottom: 1rem;
+  }
+}
+
+/* Feature Cards - Professional Polish */
+.neurobot-features-section {
+  padding: 5rem 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.neurobot-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2.5rem;
+  margin-top: 3rem;
+}
+
+.neurobot-feature-card {
+  background: var(--neurobot-bg-tertiary);
+  border: 1px solid var(--neurobot-border-default);
+  border-left: 4px solid var(--neurobot-accent-primary);
+  border-radius: 12px;
+  padding: 2.5rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.neurobot-feature-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(45, 53, 97, 0.1) 0%, rgba(74, 95, 143, 0.1) 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.neurobot-feature-card:hover::before {
+  opacity: 1;
+}
+
+.neurobot-feature-card:hover {
+  transform: scale(1.03) translateY(-8px);
+  border-color: var(--neurobot-border-accent);
+  box-shadow: 0 16px 48px var(--neurobot-shadow-sm);
+}
+
+.neurobot-feature-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.neurobot-feature-icon {
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  margin-bottom: 1.75rem;
+  transition: transform 0.3s ease;
+}
+
+.neurobot-feature-card:hover .neurobot-feature-icon {
+  transform: scale(1.1) rotate(5deg);
+}
+
+.neurobot-feature-title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--neurobot-text-primary);
+  margin-bottom: 1rem;
+}
+
+.neurobot-feature-description {
+  font-family: var(--neurobot-font-sans);
+  font-size: 1rem;
+  color: var(--neurobot-text-tertiary);
+  line-height: 1.7;
+  margin-bottom: 1.25rem;
+}
+
+.neurobot-feature-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.neurobot-badge {
+  background: rgba(91, 126, 200, 0.15);
+  border: 1px solid var(--neurobot-accent-primary);
+  color: var(--neurobot-accent-primary);
+  padding: 0.375rem 0.875rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/* Curriculum Section */
+.neurobot-curriculum-section {
+  padding: 5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.neurobot-curriculum-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+  margin-top: 3rem;
+}
+
+.neurobot-module-card {
+  background: var(--neurobot-bg-secondary);
+  border: 1px solid var(--neurobot-border-default);
+  border-left: 4px solid var(--neurobot-accent-primary);
+  border-radius: 10px;
+  padding: 2rem;
+  transition: all 0.3s ease;
+}
+
+.neurobot-module-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px var(--neurobot-shadow-sm);
+}
+
+.neurobot-module-title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.25rem;
+  color: var(--neurobot-accent-primary);
+  margin-bottom: 1.5rem;
+}
+
+.neurobot-chapter-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.neurobot-chapter-item {
+  padding: 0.75rem 0;
+  color: var(--neurobot-text-secondary);
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+}
+
+.neurobot-chapter-item:not(:last-child) {
+  border-bottom: 1px solid var(--neurobot-border-default);
+}
+
+.neurobot-chapter-item a {
+  color: inherit;
+  text-decoration: none;
+  display: block;
+  transition: all 0.2s ease;
+}
+
+.neurobot-chapter-item a:hover {
+  color: var(--neurobot-accent-primary);
+  transform: translateX(4px);
+}
+
+/* Section Headers */
+.neurobot-section-header {
+  text-align: center;
+  margin-bottom: 4rem;
+}
+
+.neurobot-section-title {
+  font-family: var(--neurobot-font-serif);
+  font-size: 2.75rem;
+  color: var(--neurobot-text-primary);
+  margin-bottom: 1rem;
+}
+
+.neurobot-section-subtitle {
+  font-size: 1.125rem;
+  color: var(--neurobot-text-tertiary);
+  max-width: 800px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+/* Redesigned Curriculum Section */
+.neurobot-curriculum-redesign {
+  padding: 6rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.neurobot-curriculum-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.neurobot-curriculum-module {
+  background: var(--neurobot-bg-tertiary);
+  border: 1px solid var(--neurobot-border-default);
+  border-left: 6px solid var(--neurobot-accent-primary);
+  border-radius: 12px;
+  padding: 3rem;
+  margin-bottom: 3rem;
+  transition: all 0.4s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.neurobot-curriculum-module::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(45, 53, 97, 0.05) 0%, rgba(74, 95, 143, 0.05) 100%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.neurobot-curriculum-module:hover::before {
+  opacity: 1;
+}
+
+.neurobot-curriculum-module:hover {
+  transform: translateX(12px);
+  border-left-width: 8px;
+  box-shadow: 0 16px 48px var(--neurobot-shadow-sm);
+}
+
+.neurobot-module-alternate {
+  border-right: 6px solid var(--neurobot-accent-primary);
+  border-left: 1px solid var(--neurobot-border-default);
+}
+
+.neurobot-module-alternate:hover {
+  transform: translateX(-12px);
+  border-right-width: 8px;
+  border-left-width: 1px;
+}
+
+.neurobot-module-large {
+  background: linear-gradient(135deg, rgba(45, 53, 97, 0.08) 0%, rgba(74, 95, 143, 0.05) 100%);
+  border-left: 8px solid var(--neurobot-accent-primary);
+  padding: 3.5rem;
+}
+
+.neurobot-module-large:hover {
+  transform: translateY(-8px) scale(1.02);
+  border-left-width: 10px;
+}
+
+.neurobot-module-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.neurobot-module-icon {
+  font-size: 3.5rem;
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 8px 24px rgba(45, 53, 97, 0.4);
+  transition: all 0.4s ease;
+}
+
+.neurobot-curriculum-module:hover .neurobot-module-icon {
+  transform: scale(1.1) rotate(5deg);
+  box-shadow: 0 12px 32px rgba(91, 126, 200, 0.6);
+}
+
+.neurobot-module-info {
+  flex: 1;
+}
+
+.neurobot-module-name {
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: var(--neurobot-text-primary);
+  margin-bottom: 0.75rem;
+  line-height: 1.3;
+}
+
+.neurobot-module-description {
+  font-size: 1.0625rem;
+  color: var(--neurobot-text-tertiary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.neurobot-module-chapters {
+  list-style: none;
+  padding: 0;
+  margin: 2rem 0 2.5rem 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  position: relative;
+  z-index: 1;
+}
+
+.neurobot-module-chapters li {
+  padding: 0.875rem 1.25rem;
+  background: rgba(91, 126, 200, 0.05);
+  border: 1px solid var(--neurobot-border-default);
+  border-radius: 8px;
+  color: var(--neurobot-text-secondary);
+  font-size: 0.9375rem;
+  transition: all 0.3s ease;
+  cursor: default;
+}
+
+.neurobot-module-chapters li:hover {
+  background: rgba(91, 126, 200, 0.1);
+  border-color: var(--neurobot-border-accent);
+  transform: translateX(6px);
+}
+
+.neurobot-module-cta {
+  display: inline-block;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  color: white;
+  font-family: var(--neurobot-font-serif);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  padding: 1rem 2.5rem;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(45, 53, 97, 0.3);
+  position: relative;
+  z-index: 1;
+}
+
+.neurobot-module-cta:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(45, 53, 97, 0.5);
+  color: white;
+  text-decoration: none;
+}
+
+.neurobot-curriculum-divider {
+  text-align: center;
+  color: var(--neurobot-accent-primary);
+  font-size: 1.5rem;
+  margin: 2rem 0;
+  opacity: 0.5;
+  position: relative;
+}
+
+.neurobot-curriculum-divider::before,
+.neurobot-curriculum-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 45%;
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--neurobot-border-accent), transparent);
+}
+
+.neurobot-curriculum-divider::before {
+  left: 0;
+}
+
+.neurobot-curriculum-divider::after {
+  right: 0;
+}
+
+/* Search bar integration */
+.navbar__search-input {
+  background: rgba(22, 27, 34, 0.8);
+  border: 1px solid rgba(91, 126, 200, 0.2);
+  color: var(--ifm-font-color-base);
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.navbar__search-input:focus {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px rgba(91, 126, 200, 0.1);
+}
+
+@media (max-width: 768px) {
+  .neurobot-hero-title {
+    font-size: 2.25rem;
+  }
+
+  .neurobot-hero {
+    padding: 3rem 1.5rem;
+  }
+
+  .neurobot-hero::before {
+    font-size: 10rem;
+  }
+
+  .neurobot-features-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .neurobot-curriculum-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .neurobot-section-title {
+    font-size: 2rem;
+  }
+
+  .neurobot-chatbot {
+    width: calc(100vw - 2rem);
+    max-height: calc(100vh - 4rem);
+    right: 1rem;
+    bottom: 1rem;
+  }
+
+  .neurobot-chatbot-toggle {
+    right: 1rem;
+    bottom: 1rem;
+  }
+
+  /* Curriculum Redesign - Mobile */
+  .neurobot-curriculum-redesign {
+    padding: 4rem 1.5rem;
+  }
+
+  .neurobot-curriculum-module {
+    padding: 2rem;
+  }
+
+  .neurobot-module-header {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1.5rem;
+  }
+
+  .neurobot-module-icon {
+    width: 64px;
+    height: 64px;
+    font-size: 2.5rem;
+  }
+
+  .neurobot-module-name {
+    font-size: 1.5rem;
+  }
+
+  .neurobot-module-chapters {
+    grid-template-columns: 1fr;
+  }
+
+  .neurobot-curriculum-module:hover {
+    transform: translateY(-4px);
+  }
+
+  .neurobot-module-alternate:hover {
+    transform: translateY(-4px);
+  }
+
+  .neurobot-module-cta {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .neurobot-features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .neurobot-curriculum-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1400px) {
+  .neurobot-hero-title {
+    font-size: 4rem;
+  }
+
+  .markdown {
+    max-width: 900px;
+  }
+}
+
+/* Light Mode Specific Overrides */
+[data-theme='light'] .navbar {
+  background: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid rgba(45, 53, 97, 0.1);
+}
+
+[data-theme='light'] .navbar__title {
+  color: var(--neurobot-text-primary);
+}
+
+[data-theme='light'] .neurobot-hero {
+  background: linear-gradient(180deg, #f8f9fb 0%, #ffffff 50%, #f8f9fb 100%);
+}
+
+[data-theme='light'] .neurobot-hero::before {
+  color: rgba(45, 53, 97, 0.03);
+}
+
+[data-theme='light'] .neurobot-hero-badge {
+  background: rgba(45, 53, 97, 0.05);
+  border: 1px solid var(--neurobot-accent-primary);
+}
+
+[data-theme='light'] .neurobot-hero-subtitle {
+  color: var(--neurobot-text-tertiary);
+}
+
+[data-theme='light'] .neurobot-hero-title {
+  color: #161b22;
+}
+
+[data-theme='light'] .neurobot-hero-title .highlight {
+  background: linear-gradient(135deg, #2d3561 0%, #5b7ec8 50%, #4a5f8f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+[data-theme='light'] .neurobot-feature-card {
+  background: var(--neurobot-bg-secondary);
+  box-shadow: 0 2px 8px var(--neurobot-shadow-sm);
+}
+
+[data-theme='light'] .neurobot-feature-card:hover {
+  box-shadow: 0 8px 24px var(--neurobot-shadow-lg);
+}
+
+[data-theme='light'] .neurobot-module-card {
+  background: var(--neurobot-bg-secondary);
+  box-shadow: 0 1px 4px var(--neurobot-shadow-sm);
+}
+
+[data-theme='light'] .neurobot-module-card:hover {
+  box-shadow: 0 4px 16px var(--neurobot-shadow-lg);
+}
+
+[data-theme='light'] .neurobot-chatbot {
+  background: var(--neurobot-bg-secondary);
+  box-shadow: 0 8px 32px var(--neurobot-shadow-lg);
+}
+
+[data-theme='light'] .neurobot-chatbot-messages {
+  background: var(--neurobot-bg-primary);
+}
+
+[data-theme='light'] .neurobot-message-assistant .neurobot-message-bubble {
+  background: var(--neurobot-bg-secondary);
+  border: 1px solid var(--neurobot-border-default);
+  box-shadow: 0 1px 3px var(--neurobot-shadow-sm);
+}
+
+[data-theme='light'] .neurobot-chatbot-input {
+  background: var(--neurobot-bg-secondary);
+}
+
+[data-theme='light'] .neurobot-input-field {
+  background: var(--neurobot-bg-primary);
+}
+
+[data-theme='light'] .menu__link:hover {
+  background: rgba(45, 53, 97, 0.05);
+}
+
+[data-theme='light'] .menu__link--active {
+  background: rgba(45, 53, 97, 0.08);
+}
+
+[data-theme='light'] .table-of-contents__link:hover {
+  background: rgba(45, 53, 97, 0.05);
+}
+
+[data-theme='light'] .markdown > h2::before {
+  color: var(--neurobot-accent-primary);
+}
+
+[data-theme='light'] .markdown blockquote {
+  background: rgba(45, 53, 97, 0.03);
+}
+
+[data-theme='light'] .admonition {
+  background: rgba(45, 53, 97, 0.03);
+}
+
+[data-theme='light'] .markdown tr:hover td {
+  background: rgba(45, 53, 97, 0.03);
+}
+
+[data-theme='light'] .pagination-nav__link:hover {
+  background: rgba(45, 53, 97, 0.05);
+}
+
+[data-theme='light'] .neurobot-typing-indicator {
+  background: var(--neurobot-bg-secondary);
+  box-shadow: 0 1px 3px var(--neurobot-shadow-sm);
+}
+
+[data-theme='light'] .neurobot-curriculum-module {
+  background: var(--neurobot-bg-secondary);
+  box-shadow: 0 2px 12px var(--neurobot-shadow-sm);
+}
+
+[data-theme='light'] .neurobot-curriculum-module:hover {
+  box-shadow: 0 8px 32px var(--neurobot-shadow-lg);
+}
+
+[data-theme='light'] .neurobot-module-chapters li {
+  background: rgba(45, 53, 97, 0.04);
+}
+
+[data-theme='light'] .neurobot-module-chapters li:hover {
+  background: rgba(45, 53, 97, 0.08);
+}
+
+[data-theme='light'] .neurobot-signup-button {
+  box-shadow: 0 2px 8px rgba(45, 53, 97, 0.25);
+}
+
+[data-theme='light'] .neurobot-signup-button:hover {
+  box-shadow: 0 4px 16px rgba(45, 53, 97, 0.4);
+}
+
+/* Light Mode Mobile Navigation */
+[data-theme='light'] .navbar-sidebar {
+  background: #f8f9fb !important;
+}
+
+[data-theme='light'] .navbar-sidebar__brand {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  border-bottom: 1px solid rgba(45, 53, 97, 0.3) !important;
+}
+
+[data-theme='light'] .navbar-sidebar .menu__link,
+[data-theme='light'] .navbar-sidebar .navbar__link {
+  color: #161b22 !important;
+}
+
+[data-theme='light'] .navbar-sidebar .menu__link:hover,
+[data-theme='light'] .navbar-sidebar .navbar__link:hover {
+  background: rgba(45, 53, 97, 0.08) !important;
+  border-left-color: var(--neurobot-accent-primary);
+  color: var(--neurobot-accent-primary) !important;
+}
+
+[data-theme='light'] .navbar-sidebar .menu__link--active,
+[data-theme='light'] .navbar-sidebar .navbar__link--active {
+  background: rgba(45, 53, 97, 0.12) !important;
+  border-left-color: #2d3561 !important;
+  color: #2d3561 !important;
+}
+
+[data-theme='light'] .navbar-sidebar::-webkit-scrollbar-track {
+  background: rgba(45, 53, 97, 0.05);
+}
+
+[data-theme='light'] .navbar-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(45, 53, 97, 0.3);
+}
+
+[data-theme='light'] .navbar-sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(45, 53, 97, 0.5);
+}
+
+[data-theme='light'] .navbar__toggle:hover {
+  color: var(--neurobot-accent-primary);
+  background: rgba(45, 53, 97, 0.08);
+}
+
+[data-theme='light'] .navbar-sidebar .neurobot-start-reading-button {
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  color: white !important;
+}
+
+[data-theme='light'] .navbar-sidebar .neurobot-start-reading-button:hover {
+  background: linear-gradient(135deg, #3d4571 0%, #5a6f9f 100%) !important;
+  color: white !important;
+}
+
+[data-theme='light'] .navbar-sidebar .neurobot-signup-button {
+  display: block !important;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%) !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(45, 53, 97, 0.3);
+}
+
+[data-theme='light'] .navbar-sidebar .neurobot-signup-button:hover {
+  background: linear-gradient(135deg, #3d4571 0%, #5a6f9f 100%) !important;
+  box-shadow: 0 6px 16px rgba(45, 53, 97, 0.5) !important;
+  color: white !important;
+}
+
+/* Selected Text Button Animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -90%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
+  }
+}
+
+/* Smooth Typing Animation */
+.neurobot-message-bubble {
+  animation: textFadeIn 0.08s ease-out;
+}
+
+@keyframes textFadeIn {
+  from {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Enhanced Typing Indicator */
+.neurobot-typing-indicator {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  background: var(--neurobot-bg-tertiary);
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.neurobot-typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2d3561 0%, #4a5f8f 100%);
+  animation: typingBounce 1.4s infinite ease-in-out;
+}
+
+.neurobot-typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.neurobot-typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
