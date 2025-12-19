@@ -77,7 +77,7 @@ async def get_collection_stats() -> Dict:
     try:
         info = await qdrant.get_collection_info()
         return {
-            "total_vectors": info["vectors_count"],
+            "total_vectors": info["points_count"],
             "indexed_vectors": info["indexed_vectors_count"],
             "total_points": info["points_count"],
         }

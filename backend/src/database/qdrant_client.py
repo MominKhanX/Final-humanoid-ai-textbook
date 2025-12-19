@@ -86,7 +86,7 @@ class QdrantConnection:
         """Get collection statistics"""
         info = self.client.get_collection(self.collection_name)
         return {
-            "vectors_count": info.vectors_count,
+            "points_count": info.points_count,
             "indexed_vectors_count": info.indexed_vectors_count,
             "points_count": info.points_count,
         }

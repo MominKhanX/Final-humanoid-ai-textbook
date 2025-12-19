@@ -39,7 +39,7 @@ async def health_check():
         info = await qdrant.get_collection_info()
         health_status["services"]["qdrant"] = {
             "status": "healthy",
-            "vectors_count": info["vectors_count"],
+            "points_count": info["points_count"],
         }
     except Exception as e:
         health_status["services"]["qdrant"] = f"unhealthy: {str(e)}"

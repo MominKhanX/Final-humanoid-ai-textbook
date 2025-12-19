@@ -91,7 +91,7 @@ class HealthResponse(BaseModel):
                     "timestamp": 1702814400.0,
                     "services": {
                         "postgres": "healthy",
-                        "qdrant": {"status": "healthy", "vectors_count": 487},
+                        "qdrant": {"status": "healthy", "points_count": 487},
                     },
                 }
             ]

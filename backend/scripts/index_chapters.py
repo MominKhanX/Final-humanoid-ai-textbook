@@ -185,7 +185,7 @@ async def index_all_chapters(docs_dir: str):
     # Get collection stats
     stats = await qdrant.get_collection_info()
     print(f"\n📦 Qdrant Collection Stats:")
-    print(f"   Total vectors: {stats['vectors_count']}")
+    print(f"   Total vectors: {stats['points_count']}")
     print(f"   Indexed vectors: {stats['indexed_vectors_count']}")
     print(f"   Total points: {stats['points_count']}")
 
