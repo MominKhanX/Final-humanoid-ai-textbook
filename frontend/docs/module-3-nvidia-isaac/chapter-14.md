@@ -17,7 +17,7 @@ This chapter covers RL fundamentals, Isaac Sim RL environment setup, training hu
 **Agent-Environment Loop**:
 1. **Agent** observes state s_t (joint positions, velocities, IMU)
 2. **Agent** selects action a_t (joint torques/positions)
-3. **Environment** transitions to s_{t+1}, returns reward r_t
+3. **Environment** transitions to s_\{t+1\}, returns reward r_t
 4. **Goal**: Learn policy π(a|s) that maximizes cumulative reward
 
 **Example: Humanoid Walking**:
@@ -338,7 +338,7 @@ python train.py task=HumanoidWalk num_envs=2048
 ```python
 class HumanoidWalkTask(VecTask):
     def reset_idx(self, env_ids):
-        # Randomize mass (±20%`)
+        # Randomize mass (±20%)
         self.robot_mass[env_ids] = self.nominal_mass * torch.rand(
             len(env_ids), device=self.device
         ) * 0.4 + 0.8  # [0.8, 1.2]
@@ -348,7 +348,7 @@ class HumanoidWalkTask(VecTask):
             len(env_ids), device=self.device
         ) * 1.0 + 0.5
 
-        # Randomize motor strength (±30%`)
+        # Randomize motor strength (±30%)
         self.motor_strength[env_ids] = torch.rand(
             len(env_ids), device=self.device
         ) * 0.6 + 0.7  # [0.7, 1.3]
