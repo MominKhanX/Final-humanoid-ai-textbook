@@ -14,7 +14,7 @@ interface Message {
   timestamp: string;
 }
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'https://final-humanoid-ai-textbook-production.up.railway.app';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
