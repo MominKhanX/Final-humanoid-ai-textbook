@@ -9,7 +9,7 @@ const config: Config = {
 
   // GitHub Pages deployment config
   url: 'https://mominkhanx.github.io',
-  baseUrl: '/neurobot-textbook/',
+  baseUrl: '/',
   organizationName: 'MominKhanX',
   projectName: 'neurobot-textbook',
   deploymentBranch: 'gh-pages',
